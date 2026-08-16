@@ -1,0 +1,36 @@
+{
+  "name": "grumpyduck",
+  "version": "1.0.0",
+  "description": "GrumpyDuck — a read-only file-organisation assistant for your local storage.",
+  "type": "commonjs",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "grumpyduck": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "dev": "ts-node src/cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "file-scanner",
+    "duplicate-finder",
+    "disk-cleaner",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "ora": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
