@@ -14,6 +14,7 @@ import { collectFileMetadata } from './fileMetadata';
 import { isLargeFile, isOldFile } from './rules';
 import { detectDuplicates } from './duplicates';
 import { isBundleDirectory } from './categories';
+import { analyzeFiles, buildIntelligenceSummary } from '../intelligence';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main scanner
@@ -88,6 +89,9 @@ export async function scan(rootDir: string, config: ScanConfig): Promise<ScanRes
   for (const he of hashErrors) {
     errors.push({ path: he.path, message: `Hash error: ${he.message}`, code: he.code });
   }
+
+  // ── File Intelligence Engine ───────────────────────────────────────────────
+  analyzeFiles(files, duplicateGroups);
 
   // ── Build summary ─────────────────────────────────────────────────────────
   const summary = buildSummary(
@@ -405,6 +409,14 @@ function buildSummary(
     if (f) potentialCleanupBytes += f.size;
   }
 
+  // Smart potential cleanup — strictly calculated from items with POTENTIAL_CLEANUP recommendation
+  let smartCleanupBytes = 0;
+  for (const f of files) {
+    if (f.intelligence?.recommendation.action === 'POTENTIAL_CLEANUP') {
+      smartCleanupBytes += f.size;
+    }
+  }
+
   // Per-category breakdown
   const categoryMap = new Map<FileCategory, CategoryStats>();
   for (const file of files) {
@@ -422,6 +434,7 @@ function buildSummary(
   }
 
   const categories = [...categoryMap.values()].sort((a, b) => b.totalBytes - a.totalBytes);
+  const intelligenceSummary = buildIntelligenceSummary(files, duplicateGroups);
 
   return {
     totalFiles: files.length,
@@ -440,7 +453,9 @@ function buildSummary(
     duplicateWastedBytes,
     emptyDirectoryCount: emptyDirectories.length,
     potentialCleanupBytes,
+    smartCleanupBytes,
     categories,
+    intelligenceSummary,
   };
 }
 

@@ -98,6 +98,12 @@ export interface FileMetadata {
    * 'null' if not computed.
    */
   hash: string | null;
+
+  /**
+   * Context-aware file intelligence, confidence, observations, and recommendation.
+   * Populated by the intelligence engine in Phase 1.2+.
+   */
+  intelligence?: import('./intelligence').FileIntelligence;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,8 +244,18 @@ export interface ScanSummary {
    */
   potentialCleanupBytes: number;
 
+  /**
+   * Smart potential cleanup bytes.
+   * Calculated strictly from items with recommendation === 'POTENTIAL_CLEANUP'
+   * (e.g. duplicate copies).
+   */
+  smartCleanupBytes?: number;
+
   /** Per-category breakdown. */
   categories: CategoryStats[];
+
+  /** Intelligence engine summary. */
+  intelligenceSummary?: import('./intelligence').IntelligenceSummary;
 }
 
 // ---------------------------------------------------------------------------

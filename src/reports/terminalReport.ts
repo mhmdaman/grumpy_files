@@ -13,16 +13,27 @@ import { relativeAge } from '../utils/formatDate';
 
 const DIVIDER = chalk.dim('─'.repeat(52));
 
-/** Grumpy duck remarks — contextual based on scan findings. */
+/** Grumpy duck remarks — contextual based on scan findings and file intelligence. */
 function getGrumpyRemark(summary: ScanSummary): string {
-  if (summary.duplicateGroupCount > 200) {
+  const intel = summary.intelligenceSummary;
+
+  if (summary.duplicateGroupCount > 20 || (intel && intel.duplicateGroupCount > 20)) {
     return `I found ${formatNumber(summary.duplicateGroupCount)} duplicate groups. We should probably talk.`;
+  }
+  if (intel && intel.installerCount >= 3) {
+    return "You've been collecting installers like they're Pokémon.";
+  }
+  if (intel && intel.datasetCount > 0) {
+    return "I found some datasets. I'm not touching those. You might actually need them.";
+  }
+  if (intel && intel.devArtifactCount > 100 && intel.devArtifactCount > summary.totalFiles * 0.4) {
+    return "A lot of this looks like developer-generated stuff. I'll leave it alone.";
   }
   if (summary.potentialCleanupBytes > 5 * 1024 * 1024 * 1024) {
     return "Okay... you've got some cleaning to do.";
   }
   if (summary.potentialCleanupBytes > 100 * 1024 * 1024) {
-    return "Your Downloads folder is getting crowded.";
+    return "Your storage is getting crowded.";
   }
   if (summary.largeFileCount > 5 || summary.oldFileCount > 20) {
     return "I found a few things worth reviewing.";
@@ -63,6 +74,18 @@ export function printReport(result: ScanResult): void {
     chalk.white('Total storage:         ') + chalk.bold(formatBytes(summary.totalBytes)),
   );
 
+  // ── File Intelligence ──────────────────────────────────────────────────────
+  if (summary.intelligenceSummary) {
+    console.log('');
+    console.log(DIVIDER);
+    console.log(chalk.bold('🧠  File Intelligence'));
+    console.log('');
+    printIntelligenceOverview(summary);
+  }
+
+  // ── GrumpyDuck Noticed (Examples) ──────────────────────────────────────────
+  printGrumpyNoticed(files, duplicateGroups);
+
   // ── Categories ────────────────────────────────────────────────────────────
   if (summary.categories.length > 0) {
     console.log('');
@@ -79,9 +102,9 @@ export function printReport(result: ScanResult): void {
   const largeFiles = files.filter((f) => f.sizeLabel !== null);
   printLargeFiles(largeFiles);
 
-  // ── Old files ─────────────────────────────────────────────────────────────
+  // ── Old files (Grouped by Intelligence) ────────────────────────────────────
   const oldFiles = files.filter((f) => f.ageLabel !== null);
-  printOldFiles(oldFiles);
+  printOldFiles(oldFiles, summary);
 
   // ── Duplicates ────────────────────────────────────────────────────────────
   printDuplicates(duplicateGroups);
@@ -109,17 +132,24 @@ export function printReport(result: ScanResult): void {
   console.log(chalk.bold('🧹  Potential Cleanup'));
   console.log('');
   console.log(
-    chalk.white('  Large files:      ') + chalk.bold(formatBytes(summary.largeFileBytes)),
+    chalk.white('  Large files:          ') + chalk.bold(formatBytes(summary.largeFileBytes)),
   );
   console.log(
-    chalk.white('  Old files:        ') + chalk.bold(formatBytes(summary.oldFileBytes)),
+    chalk.white('  Old files:            ') + chalk.bold(formatBytes(summary.oldFileBytes)),
   );
   console.log(
-    chalk.white('  Duplicate waste:  ') +
+    chalk.white('  Duplicate waste:      ') +
     chalk.bold(formatBytes(summary.duplicateWastedBytes)),
   );
-  console.log('');
 
+  if (summary.smartCleanupBytes !== undefined && summary.smartCleanupBytes > 0) {
+    console.log('');
+    console.log(
+      chalk.green.bold(`  Conservative Cleanup (Duplicates): ${formatBytes(summary.smartCleanupBytes)}`),
+    );
+  }
+
+  console.log('');
   const cleanupStr = formatBytes(summary.potentialCleanupBytes);
   console.log(
     chalk.cyan.bold(`  Potentially Recoverable: ${cleanupStr}`),
@@ -142,7 +172,7 @@ export function printReport(result: ScanResult): void {
   );
   console.log(
     chalk.dim(
-      '   All results are labelled "Potential cleanup candidate" — review before acting.',
+      '   All recommendations are conservative — review before taking action.',
     ),
   );
   console.log('');
@@ -151,6 +181,156 @@ export function printReport(result: ScanResult): void {
 // ─────────────────────────────────────────────────────────────────────────────
 // Section printers
 // ─────────────────────────────────────────────────────────────────────────────
+
+function printIntelligenceOverview(summary: ScanSummary): void {
+  const intel = summary.intelligenceSummary;
+  if (!intel) return;
+
+  const cats = intel.categories;
+
+  if (cats.DATASET > 0) {
+    console.log(`  ${chalk.cyan('📊 Datasets')}`);
+    console.log(`     ${cats.DATASET} ${cats.DATASET === 1 ? 'file' : 'files'}`);
+    console.log(`     Recommendation: ${chalk.green.bold('KEEP')}`);
+    console.log('');
+  }
+
+  if (cats.INSTALLER > 0) {
+    console.log(`  ${chalk.cyan('💿 Installers')}`);
+    console.log(`     ${cats.INSTALLER} ${cats.INSTALLER === 1 ? 'file' : 'files'}`);
+    console.log(`     Recommendation: ${chalk.yellow.bold('REVIEW')}`);
+    console.log('');
+  }
+
+  if (summary.duplicateGroupCount > 0) {
+    console.log(`  ${chalk.cyan('📋 Duplicates')}`);
+    console.log(`     ${summary.duplicateGroupCount} duplicate ${summary.duplicateGroupCount === 1 ? 'group' : 'groups'}`);
+    console.log(`     Recommendation: ${chalk.magenta.bold('POTENTIAL CLEANUP')}`);
+    console.log('');
+  }
+
+  if (cats.DEVELOPMENT_ARTIFACT > 0) {
+    console.log(`  ${chalk.cyan('🧩 Development Artifacts')}`);
+    console.log(`     ${cats.DEVELOPMENT_ARTIFACT} ${cats.DEVELOPMENT_ARTIFACT === 1 ? 'file' : 'files'}`);
+    console.log(`     Recommendation: ${chalk.dim.bold('IGNORE')}`);
+    console.log('');
+  }
+
+  if (cats.DOCUMENT > 0) {
+    console.log(`  ${chalk.cyan('📄 Documents')}`);
+    console.log(`     ${cats.DOCUMENT} ${cats.DOCUMENT === 1 ? 'file' : 'files'}`);
+    console.log(`     Recommendation: ${chalk.white.bold('REVIEW where appropriate')}`);
+    console.log('');
+  }
+}
+
+function printGrumpyNoticed(files: FileMetadata[], duplicateGroups: DuplicateGroup[]): void {
+  // Pick a few notable items across diverse categories: Installers, Datasets, Duplicates, Large
+  const notable: FileMetadata[] = [];
+  const seen = new Set<string>();
+
+  // 1. Pick a dataset if present
+  const dataset = files.find((f) => f.intelligence?.classification.type === 'DATASET');
+  if (dataset) { notable.push(dataset); seen.add(dataset.path); }
+
+  // 2. Pick an installer if present
+  const installer = files.find((f) => f.intelligence?.classification.type === 'INSTALLER' && !seen.has(f.path));
+  if (installer) { notable.push(installer); seen.add(installer.path); }
+
+  // 3. Pick a duplicate if present
+  if (duplicateGroups.length > 0 && duplicateGroups[0].files.length >= 2) {
+    const dup = duplicateGroups[0].files[1]; // Pick duplicate extra copy
+    if (dup && !seen.has(dup.path)) { notable.push(dup); seen.add(dup.path); }
+  }
+
+  // 4. Pick a large or interesting file if needed to have 2-4 examples
+  for (const f of files) {
+    if (notable.length >= 4) break;
+    if (!seen.has(f.path) && (f.sizeLabel === 'Very Large' || f.sizeLabel === 'Large')) {
+      notable.push(f);
+      seen.add(f.path);
+    }
+  }
+
+  if (notable.length === 0) return;
+
+  console.log(DIVIDER);
+  console.log(chalk.bold('🦆  GrumpyDuck noticed:'));
+  console.log('');
+
+  for (const f of notable) {
+    const intel = f.intelligence;
+    const typeStr = intel ? formatCategoryName(intel.classification.type) : f.category;
+    const icon = getCategoryIcon(intel?.classification.type ?? 'UNKNOWN');
+    const confStr = intel ? `Confidence: ${intel.confidenceLevel}` : '';
+    const action = intel?.recommendation.action ?? 'REVIEW';
+    const actionColor = getActionColor(action);
+
+    console.log(`  ${icon} ${chalk.bold(f.name)}`);
+    console.log(`     ${chalk.cyan(typeStr)} • ${formatBytes(f.size)} ${confStr ? `• ${chalk.dim(confStr)}` : ''}`);
+    console.log(`     → ${actionColor(formatActionName(action))}`);
+    if (intel?.recommendation.reasons && intel.recommendation.reasons.length > 0) {
+      for (const r of intel.recommendation.reasons.slice(0, 2)) {
+        console.log(`       ${chalk.dim('• ' + r)}`);
+      }
+    }
+    console.log('');
+  }
+}
+
+function formatCategoryName(cat: string): string {
+  switch (cat) {
+    case 'DATASET': return 'Dataset';
+    case 'INSTALLER': return 'Installer';
+    case 'DOCUMENT': return 'Document';
+    case 'DEVELOPMENT_ARTIFACT': return 'Development Artifact';
+    case 'APPLICATION': return 'Application';
+    case 'IMAGE': return 'Image';
+    case 'VIDEO': return 'Video';
+    case 'AUDIO': return 'Audio';
+    case 'ARCHIVE': return 'Archive';
+    case 'CODE': return 'Code';
+    case 'TEMPORARY_FILE': return 'Temporary File';
+    default: return 'File';
+  }
+}
+
+function getCategoryIcon(cat: string): string {
+  switch (cat) {
+    case 'DATASET': return '📊';
+    case 'INSTALLER': return '💿';
+    case 'DOCUMENT': return '📄';
+    case 'DEVELOPMENT_ARTIFACT': return '🧩';
+    case 'APPLICATION': return '📱';
+    case 'IMAGE': return '🖼️ ';
+    case 'VIDEO': return '🎬';
+    case 'AUDIO': return '🎵';
+    case 'ARCHIVE': return '📦';
+    case 'CODE': return '💻';
+    case 'TEMPORARY_FILE': return '🗑️ ';
+    default: return '📄';
+  }
+}
+
+function getActionColor(action: string): (text: string) => string {
+  switch (action) {
+    case 'KEEP': return chalk.green.bold;
+    case 'POTENTIAL_CLEANUP': return chalk.magenta.bold;
+    case 'IGNORE': return chalk.dim.bold;
+    case 'REVIEW':
+    default: return chalk.yellow.bold;
+  }
+}
+
+function formatActionName(action: string): string {
+  switch (action) {
+    case 'KEEP': return 'Keep';
+    case 'POTENTIAL_CLEANUP': return 'Potential cleanup';
+    case 'IGNORE': return 'Ignore';
+    case 'REVIEW':
+    default: return 'Review';
+  }
+}
 
 function printCategories(categories: CategoryStats[]): void {
   const maxCount = Math.max(...categories.map((c) => c.count));
@@ -196,16 +376,44 @@ function printLargeFiles(largeFiles: FileMetadata[]): void {
   }
 }
 
-function printOldFiles(oldFiles: FileMetadata[]): void {
+function printOldFiles(oldFiles: FileMetadata[], summary: ScanSummary): void {
   console.log('');
-  console.log(chalk.bold('🕰️   Potentially Old Files'));
+  console.log(chalk.bold('🕰️   Old Files'));
   if (oldFiles.length === 0) {
     console.log(chalk.dim('  None detected above age threshold.'));
     return;
   }
-  console.log(chalk.dim(`  ${oldFiles.length} files detected`));
-  console.log(chalk.dim('  Note: Age alone does not mean a file is unwanted.'));
+
+  console.log(chalk.dim(`  ${oldFiles.length} old files detected`));
   console.log('');
+
+  const intelSummary = summary.intelligenceSummary?.oldFilesByIntelligence;
+  if (intelSummary && (intelSummary.useful.count > 0 || intelSummary.review.count > 0 || intelSummary.development.count > 0)) {
+    if (intelSummary.useful.count > 0) {
+      console.log(`  ${chalk.green('Potentially useful:')}`);
+      if (intelSummary.useful.documents > 0) console.log(`    ${intelSummary.useful.documents} documents`);
+      if (intelSummary.useful.datasets > 0) console.log(`    ${intelSummary.useful.datasets} datasets`);
+      if (intelSummary.useful.archives > 0) console.log(`    ${intelSummary.useful.archives} archives`);
+    }
+
+    if (intelSummary.review.count > 0) {
+      console.log(`  ${chalk.yellow('Worth reviewing:')}`);
+      if (intelSummary.review.installers > 0) console.log(`    ${intelSummary.review.installers} installers`);
+      if (intelSummary.review.duplicates > 0) console.log(`    ${intelSummary.review.duplicates} duplicate files`);
+      if (intelSummary.review.others > 0) console.log(`    ${intelSummary.review.others} other files`);
+    }
+
+    if (intelSummary.development.count > 0) {
+      console.log(`  ${chalk.dim('Development/generated:')}`);
+      console.log(`    ${intelSummary.development.count} files`);
+    }
+
+    if (intelSummary.ignored.count > 0) {
+      console.log(`  ${chalk.dim('Ignored:')}`);
+      console.log(`    ${intelSummary.ignored.count} files`);
+    }
+    console.log('');
+  }
 
   const sorted = [...oldFiles].sort((a, b) => a.modifiedAt - b.modifiedAt);
   const shown = sorted.slice(0, 10);
