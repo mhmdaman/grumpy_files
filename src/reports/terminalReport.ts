@@ -255,7 +255,7 @@ function printGrumpyNoticed(files: FileMetadata[], duplicateGroups: DuplicateGro
   if (notable.length === 0) return;
 
   console.log(DIVIDER);
-  console.log(chalk.bold('🦆  GrumpyDuck noticed:'));
+  console.log(chalk.bold(' 🐥 GrumpyDuck noticed:'));
   console.log('');
 
   for (const f of notable) {

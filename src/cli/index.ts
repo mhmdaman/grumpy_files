@@ -18,6 +18,7 @@ import { DEFAULT_CONFIG } from '../scanner/rules';
 import { ScanConfig } from '../types/scanner';
 import { printReport } from '../reports/terminalReport';
 import { writeJSONReport } from '../reports/jsonReport';
+import { runInteractiveReview } from '../review/reviewer';
 
 const program = new Command();
 
@@ -98,7 +99,7 @@ program
     let spinner: ReturnType<typeof ora> | null = null;
     if (!useJSON) {
       console.log('');
-      console.log(chalk.yellow.bold('🦆  GrumpyDuck is investigating…'));
+      console.log(chalk.yellow.bold('🐥 GrumpyDuck is investigating…'));
       console.log('');
       console.log(chalk.dim('Scanning: ') + chalk.cyan(resolvedDir));
       console.log('');
@@ -131,6 +132,96 @@ program
     }
   });
 
+program
+  .command('review <directory>')
+  .description('Interactively review file recommendations and curate a cleanup plan')
+  .option(
+    '--export <file>',
+    'Export the cleanup review decisions to a JSON plan file',
+  )
+  .option(
+    '--large-threshold <mb>',
+    'Threshold in MB above which a file is considered "Medium large"',
+    String(DEFAULT_CONFIG.mediumBytes / (1024 * 1024)),
+  )
+  .option(
+    '--old-threshold <days>',
+    'Files not modified in this many days are considered "Old"',
+    String(DEFAULT_CONFIG.oldDays),
+  )
+  .option(
+    '--no-hidden',
+    'Exclude hidden files and directories (dot-files)',
+    false,
+  )
+  .option(
+    '--follow-symlinks',
+    'Follow symbolic links during traversal (off by default for safety)',
+    false,
+  )
+  .action(async (directory: string, options: {
+    export?: string;
+    largeThreshold: string;
+    oldThreshold: string;
+    noHidden: boolean;
+    followSymlinks: boolean;
+  }) => {
+    // ── Resolve directory (support ~ expansion) ──────────────────────────────
+    const resolvedDir = directory.startsWith('~')
+      ? path.join(os.homedir(), directory.slice(1))
+      : path.resolve(directory);
+
+    // ── Build config from CLI options ────────────────────────────────────────
+    const mediumMb = parseFloat(options.largeThreshold);
+    const oldDays = parseInt(options.oldThreshold, 10);
+
+    if (isNaN(mediumMb) || mediumMb <= 0) {
+      console.error(chalk.red('Error: --large-threshold must be a positive number (MB)'));
+      process.exit(1);
+    }
+    if (isNaN(oldDays) || oldDays <= 0) {
+      console.error(chalk.red('Error: --old-threshold must be a positive integer (days)'));
+      process.exit(1);
+    }
+
+    const config: ScanConfig = {
+      ...DEFAULT_CONFIG,
+      mediumBytes: mediumMb * 1024 * 1024,
+      oldDays,
+      includeHidden: !options.noHidden,
+      followSymlinks: options.followSymlinks,
+    };
+
+    // ── Spinner ───────────────────────────────────────────────────────────────
+    console.log('');
+    console.log(chalk.yellow.bold('🦆  GrumpyDuck is analyzing candidates for review…'));
+    console.log('');
+    console.log(chalk.dim('Target: ') + chalk.cyan(resolvedDir));
+    console.log('');
+    const spinner = ora({ text: 'Walking directory & running intelligence rules…', color: 'yellow' }).start();
+
+    // ── Run scan & intelligence ───────────────────────────────────────────────
+    let result;
+    try {
+      result = await scan(resolvedDir, config);
+    } catch (err: unknown) {
+      spinner.fail();
+      const error = err as NodeJS.ErrnoException;
+      console.error(chalk.red(`\nFailed to scan: ${error.message}`));
+      if (error.code === 'ENOENT') {
+        console.error(chalk.dim('The directory does not exist.'));
+      } else if (error.code === 'EACCES') {
+        console.error(chalk.dim('Permission denied — try running with elevated permissions.'));
+      }
+      process.exit(1);
+    }
+
+    spinner.succeed(chalk.green('Analysis complete'));
+
+    // ── Interactive Review ────────────────────────────────────────────────────
+    await runInteractiveReview(result, options.export);
+  });
+
 // Show help if no command is provided
 program.addHelpCommand(true);
 program.parse(process.argv);
@@ -138,3 +229,4 @@ program.parse(process.argv);
 if (process.argv.length < 3) {
   program.help();
 }
+
