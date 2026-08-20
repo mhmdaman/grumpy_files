@@ -51,6 +51,7 @@ export interface ExportedPlanItem {
   path: string;
   name: string;
   size: number;
+  hash?: string;
   classification: IntelligenceCategory;
   recommendation: Recommendation;
   userDecision: UserDecision;

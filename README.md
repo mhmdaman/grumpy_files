@@ -1,25 +1,23 @@
-# 🦆 GrumpyDuck — Phase 3: Interactive Review & Cleanup Planning
+# 🦆 GrumpyDuck — Phase 4: Safe Cleanup, Trash Integration & Undo
 
 > A read-only local file-organisation assistant that tells you the truth about your storage.
 
-GrumpyDuck scans a directory, analyses its contents, interprets file purpose and context, and provides an interactive review session allowing you to curate a cleanup plan — while remaining **strictly read-only** with **zero filesystem modifications**. It is a duck, not a broom.
+GrumpyDuck scans a directory, analyses its contents, interprets file purpose and context, and provides an interactive review session allowing you to curate a cleanup plan. It then executes the cleanup by strictly moving files to the **macOS Trash**, while maintaining zero permanent filesystem deletions. It is a duck, not a broom.
 
 ---
 
-## What's New in Phase 3: Interactive Review & Cleanup Planning
+## What's New in Phase 4: Safe Cleanup, Trash Integration & Undo
 
-- **Interactive `review` Command (`npm start -- review <path>`)**: Present file recommendations one by one with complete context and clear options (`[K] Keep`, `[C] Mark for cleanup`, `[S] Skip`, `[D] Details`, `[Q] Quit`).
-- **Prioritised Review Flow**: Intelligently ranks candidates so the highest-impact items come first:
-  1. Redundant Duplicate Copies (`POTENTIAL_CLEANUP`)
-  2. Application Installers in Downloads (`REVIEW`)
-  3. Large Files under review (`REVIEW`)
-  4. Other Old / Context Review candidates
-- **Duplicate Group Intelligence**: Identifies primary vs. redundant copies in duplicate groups. Only redundant extra copies are queued as cleanup candidates; the primary retained copy is protected.
-- **Deep File Inspection (`[D] Details`)**: Shows complete metadata, confidence scores, observations, modification history, and all duplicate file locations before deciding.
-- **In-Memory Session State**: Tracks live progress (`Reviewed: X / Total`, `KEEP`, `Cleanup`, `Skipped`, and cumulative potential cleanup bytes) with zero disk mutations.
-- **Cleanup Plan Export (`--export <file>`)**: Generates structured JSON cleanup plans (`{ scanPath, createdAt, readOnly: true, files: [...], totalSelectedBytes }`) for future automation.
-- **Protected Paths Layer**: Built-in safety subsystem protecting system-critical roots (`/System`, `/Library`, `/usr`, `/bin`, `/sbin`, `/etc`, `/var`, `/private`) from being targeted for cleanup.
-- **Strictly Read-Only Guarantee**: Absolutely no files are deleted, moved, renamed, or modified.
+- **Native macOS Trash Integration (`clean` command)**: Safely executes cleanup plans (`npm start -- clean <path> --plan <file>`) by transferring explicitly selected files directly to the macOS Trash using native AppleScript integration. No files are permanently deleted (`rm` and `unlink` are strictly forbidden).
+- **Dry-Run Preview (`--dry-run`)**: Safely preview the exact files that will be moved to the Trash and calculate the potential recovered space, completely without touching the disk.
+- **Strict Pre-flight Validation**: 
+  - Validates that files haven't changed size or content hash since the review.
+  - Skips missing files gracefully.
+  - Enforces the protected system path layer (`/System`, `/Library`, `/usr`, etc.).
+  - Explicitly refuses to remove `.app` bundles or whole directories.
+- **Cleanup History (`history` command)**: Maintains a detailed log of all past cleanup operations (`logs/cleanup-history.json`), allowing you to review what was moved, when, and the total space recovered.
+- **Safe Recovery (`undo` command)**: Because automated restoration can be risky, the `undo` command fetches the most recent cleanup operation and provides precise, manual instructions on how to use the macOS Trash "Put Back" feature to safely recover your files.
+- **Explicit Plan Execution**: Files are never cleaned blindly. A `review` session must be conducted first to generate a structured `.json` cleanup plan containing explicit `CLEANUP` markers.
 
 ---
 

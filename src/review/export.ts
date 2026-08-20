@@ -26,6 +26,7 @@ export function buildCleanupPlan(
       path: item.file.path,
       name: item.file.name,
       size: item.file.size,
+      hash: item.file.hash || undefined,
       classification: intel?.classification.type ?? 'UNKNOWN',
       recommendation: intel?.recommendation.action ?? 'REVIEW',
       userDecision: item.decision ?? 'SKIP',
