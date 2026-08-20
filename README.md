@@ -1,22 +1,25 @@
-# 🦆 GrumpyDuck — Phase 1.2: File Intelligence & Recommendation Engine
+# 🦆 GrumpyDuck — Phase 3: Interactive Review & Cleanup Planning
 
 > A read-only local file-organisation assistant that tells you the truth about your storage.
 
-GrumpyDuck scans a directory, analyses its contents, interprets file purpose and context, and produces a detailed, intelligent report — but **never touches a single file**. It is a duck, not a broom.
+GrumpyDuck scans a directory, analyses its contents, interprets file purpose and context, and provides an interactive review session allowing you to curate a cleanup plan — while remaining **strictly read-only** with **zero filesystem modifications**. It is a duck, not a broom.
 
 ---
 
-## What's New in Phase 1.2: File Intelligence & Recommendation Engine
+## What's New in Phase 3: Interactive Review & Cleanup Planning
 
-- **Context-Aware Classification**: Categorises files into 12 distinct intelligence categories (`DOCUMENT`, `DATASET`, `IMAGE`, `VIDEO`, `AUDIO`, `ARCHIVE`, `INSTALLER`, `APPLICATION`, `CODE`, `DEVELOPMENT_ARTIFACT`, `TEMPORARY_FILE`, `UNKNOWN`) using context, directory structure, and patterns beyond file extensions alone.
-- **Dataset Intelligence**: Differentiates genuine datasets (e.g. `UNSW-NB15_training-set.csv`, `.parquet`, `.feather`, `.npy`) from ordinary spreadsheets (e.g. `expenses_2024.csv`) and prioritises keeping them.
-- **Installer Recognition**: Identifies application installers (`.dmg`, `.pkg`, `.exe`, `.msi`, `.iso`) and flags them for review when stored in temporary locations like `Downloads`.
-- **Developer Artifact Detection**: Detects build artifacts and project dependencies (`node_modules`, `dist`, `build`, `__pycache__`, `.venv`, `.next`, `.map`, `.pyc`) and recommends ignoring them rather than treating them as user documents.
-- **Conservative Recommendation Hierarchy**: Employs deterministic `KEEP`, `REVIEW`, `POTENTIAL_CLEANUP`, and `IGNORE` recommendations. Never automatically assumes old age equals disposable material.
-- **Transparent Explanations & Confidence Scoring**: Every recommendation provides human-readable reasons explaining *why*, accompanied by numeric confidence scores (0.00 – 1.00) mapped to `High`, `Medium`, and `Low` tiers.
-- **Smart Cleanup Estimation**: Calculates conservative potential cleanup strictly from redundant duplicate copies (`POTENTIAL_CLEANUP`), preventing applications and normal large files from distorting actionable cleanup figures.
-- **Organised Old Files Breakdown**: Splits old files into meaningful groups: *Potentially useful* (documents, datasets, archives), *Worth reviewing* (installers, duplicates), *Development/generated*, and *Ignored*.
-- **macOS Application Bundle Handling**: Preserves logical application bundles (`.app`, `.framework`, `.plugin`, `.kext`, `.xpc`) and isolates bundle internals from user cleanup statistics.
+- **Interactive `review` Command (`npm start -- review <path>`)**: Present file recommendations one by one with complete context and clear options (`[K] Keep`, `[C] Mark for cleanup`, `[S] Skip`, `[D] Details`, `[Q] Quit`).
+- **Prioritised Review Flow**: Intelligently ranks candidates so the highest-impact items come first:
+  1. Redundant Duplicate Copies (`POTENTIAL_CLEANUP`)
+  2. Application Installers in Downloads (`REVIEW`)
+  3. Large Files under review (`REVIEW`)
+  4. Other Old / Context Review candidates
+- **Duplicate Group Intelligence**: Identifies primary vs. redundant copies in duplicate groups. Only redundant extra copies are queued as cleanup candidates; the primary retained copy is protected.
+- **Deep File Inspection (`[D] Details`)**: Shows complete metadata, confidence scores, observations, modification history, and all duplicate file locations before deciding.
+- **In-Memory Session State**: Tracks live progress (`Reviewed: X / Total`, `KEEP`, `Cleanup`, `Skipped`, and cumulative potential cleanup bytes) with zero disk mutations.
+- **Cleanup Plan Export (`--export <file>`)**: Generates structured JSON cleanup plans (`{ scanPath, createdAt, readOnly: true, files: [...], totalSelectedBytes }`) for future automation.
+- **Protected Paths Layer**: Built-in safety subsystem protecting system-critical roots (`/System`, `/Library`, `/usr`, `/bin`, `/sbin`, `/etc`, `/var`, `/private`) from being targeted for cleanup.
+- **Strictly Read-Only Guarantee**: Absolutely no files are deleted, moved, renamed, or modified.
 
 ---
 
@@ -25,11 +28,14 @@ GrumpyDuck scans a directory, analyses its contents, interprets file purpose and
 - [Installation](#installation)
 - [Usage](#usage)
 - [CLI Commands](#cli-commands)
+  - [`scan <directory>`](#scan-directory)
+  - [`review <directory>`](#review-directory)
+- [Interactive Keyboard Controls](#interactive-keyboard-controls)
 - [Configuration Options](#configuration-options)
 - [Intelligence & Recommendation System](#intelligence--recommendation-system)
-- [Output Formats](#output-formats)
-- [Report Format (JSON Schema)](#report-format-json-schema)
-- [Safety Limitations](#safety-limitations)
+- [Review Flow Example](#review-flow-example)
+- [Cleanup Plan Export Schema](#cleanup-plan-export-schema)
+- [Safety Limitations & Protected Paths](#safety-limitations--protected-paths)
 - [Project Architecture](#project-architecture)
 - [Running Tests](#running-tests)
 - [Tauri Integration Guide](#tauri-integration-guide)
@@ -56,17 +62,17 @@ npm run build
 ## Usage
 
 ```bash
-# Scan your Downloads folder
+# 1. Scan and inspect storage summary
 npm start -- scan ~/Downloads
 
-# Scan any directory
-npm start -- scan /path/to/any/folder
+# 2. Interactively review candidates and build a cleanup plan
+npm start -- review ~/Downloads
 
-# Output as JSON (to stdout)
+# 3. Interactively review and export the cleanup plan to JSON
+npm start -- review ~/Downloads --export cleanup-plan.json
+
+# 4. Generate raw scan JSON report
 npm start -- scan ~/Downloads --json
-
-# Write JSON report to a file
-npm start -- scan ~/Downloads --output report.json
 ```
 
 ---
@@ -77,7 +83,7 @@ npm start -- scan ~/Downloads --output report.json
 
 Scan a directory and generate a file-organisation report.
 
-```
+```bash
 grumpyduck scan <directory> [options]
 ```
 
@@ -92,282 +98,147 @@ grumpyduck scan <directory> [options]
 
 ---
 
-## Configuration Options
+### `review <directory>`
 
-All thresholds are configurable via CLI flags. The defaults are:
+Interactively review file recommendations and curate an in-memory cleanup plan.
 
-| Threshold | Default | Flag |
-|---|---|---|
-| Very Large files | > 1 GB | (derived from `--large-threshold * 10`) |
-| Large files | > 500 MB | (derived from `--large-threshold * 5`) |
-| Medium files | > 100 MB | `--large-threshold 100` |
-| Old files | > 180 days since modification | `--old-threshold 180` |
-| Very Old files | > 365 days since modification | (derived from `--old-threshold * 2`) |
-| Follow symlinks | Never | `--follow-symlinks` |
-| Include hidden | Yes | `--no-hidden` to exclude |
-
----
-
-## Intelligence & Recommendation System
-
-GrumpyDuck decouples **raw observations** (size, age, duplicates, location) from **interpretative intelligence** (classification, confidence, recommendation, and reasoning):
-
-| Classification | Observation Signals | Recommendation | Explanation Example |
-|---|---|---|---|
-| **`DATASET`** | Filename contains `training`, `dataset`, `features` or native format (`.parquet`) | `KEEP` | CSV dataset; old age alone is not sufficient reason to remove |
-| **`INSTALLER`** | `.dmg`, `.pkg`, `.exe`, `.msi` in `Downloads/` | `REVIEW` | Application installer stored in Downloads; review if already installed |
-| **`DEVELOPMENT_ARTIFACT`** | In `node_modules`, `dist`, `__pycache__`, or `.pyc`/`.map` | `IGNORE` | Generated or managed by developer tooling |
-| **`DOCUMENT`** (Duplicate) | Identical SHA-256 hash to another file | `POTENTIAL_CLEANUP` | Extra redundant copy with identical content elsewhere |
-| **`DOCUMENT`** (Old) | Unmodified > 365 days | `REVIEW` | Old document; review before archiving or deleting |
-| **`APPLICATION`** | `.app` bundle directory | `KEEP` | Logical macOS application bundle |
-
----
-
-## Output Formats
-
-### Terminal (default)
-
-```text
-🦆  GrumpyDuck — Scan Complete
-
-Scanned: /Users/you/Downloads
-
-Logical items scanned: 1,383
-Folders scanned:       118
-Total storage:         9.41 GB
-
-────────────────────────────────────────────────────
-🧠  File Intelligence
-
-  📊 Datasets
-     18 files
-     Recommendation: KEEP
-
-  💿 Installers
-     20 files
-     Recommendation: REVIEW
-
-  📋 Duplicates
-     224 duplicate groups
-     Recommendation: POTENTIAL CLEANUP
-
-  🧩 Development Artifacts
-     4 files
-     Recommendation: IGNORE
-
-  📄 Documents
-     400 files
-     Recommendation: REVIEW where appropriate
-
-────────────────────────────────────────────────────
-🦆  GrumpyDuck noticed:
-
-  📊 UNSW-NB15_training-set.csv
-     Dataset • 120.00 MB • Confidence: High
-     → Keep
-       • CSV file
-       • Filename or format indicates dataset or training material
-
-  💿 googlechrome.dmg
-     Installer • 205.45 MB • Confidence: High
-     → Review
-       • DMG installer
-       • Located in Downloads
-
-  📄 notes (1).pdf
-     Document • 2.80 MB • Confidence: High
-     → Potential cleanup
-       • Identical content hash matches other files
-       • Redundant duplicate copy
-
-────────────────────────────────────────────────────
-📂  File Categories
-
-  Installers   █░░░░░░░░░░░░░░░░░░░     20 files    4.04 GB
-  Documents    ████████████████████    400 files    1.61 GB
-  Videos       █░░░░░░░░░░░░░░░░░░░     10 files  830.79 MB
-  Archives     █░░░░░░░░░░░░░░░░░░░     27 files  633.15 MB
-  Applications ░░░░░░░░░░░░░░░░░░░░      2 apps   574.20 MB
-  Images       ██████████████░░░░░░    281 files  115.33 MB
-  ...
-
-────────────────────────────────────────────────────
-📦  Large Files
-  17 files detected
-  [Large] IMG_3732.MOV (588.59 MB)
-  [Large] Visual Studio Code.app (571.14 MB)
-
-🕰️   Old Files
-  641 old files detected
-
-  Potentially useful:
-    209 documents
-    13 datasets
-    6 archives
-  Worth reviewing:
-    23 installers
-    154 duplicate files
-    236 other files
-
-📋  Duplicate Files
-  224 duplicate groups (248 extra copies, 640.99 MB wasted)
-
-📁  Empty Folders
-  5 empty folders detected
-
-────────────────────────────────────────────────────
-🧹  Potential Cleanup
-
-  Large files:          5.91 GB
-  Old files:            6.27 GB
-  Duplicate waste:      640.99 MB
-
-  Conservative Cleanup (Duplicates): 520.94 MB
-
-  Potentially Recoverable: 8.04 GB
-  (Estimate only. Files may be important and should be reviewed before deletion.)
-
-────────────────────────────────────────────────────
-🦆  GrumpyDuck says:
-   "I found 224 duplicate groups. We should probably talk."
-
-⚠️  GrumpyDuck is read-only. Nothing was deleted, moved, or modified.
-   All recommendations are conservative — review before taking action.
+```bash
+grumpyduck review <directory> [options]
 ```
 
-### JSON (`--json` / `--output`)
-
-Structured JSON containing all scan and intelligence data. See [Report Format](#report-format-json-schema) below.
+| Option | Description | Default |
+|---|---|---|
+| `--export <file>` | Export review decisions to a structured JSON cleanup plan | — |
+| `--large-threshold <mb>` | "Medium" file threshold in MB | `100` |
+| `--old-threshold <days>` | "Old" file threshold in days since last modification | `180` |
+| `--no-hidden` | Exclude hidden files and directories | Hidden included |
+| `--follow-symlinks` | Follow symbolic links during traversal | `false` (safe default) |
 
 ---
 
-## Report Format (JSON Schema)
+## Interactive Keyboard Controls
 
-The JSON output follows a stable schema versioned by `schemaVersion: "1.0.0"`.
+During an active review session, GrumpyDuck presents one candidate at a time with the following controls:
+
+| Key | Action | Description |
+|:---:|---|---|
+| **`K`** | **Keep** | Mark file to be retained |
+| **`C`** | **Mark for Cleanup** | Add file to the in-memory cleanup plan (no files deleted) |
+| **`S`** | **Skip** | Skip decision for this candidate for now |
+| **`D`** | **Details** | Display comprehensive metadata, duplicate group paths, and reasons |
+| **`Q`** | **Quit** | End review session and display final summary (exports plan if requested) |
+
+---
+
+## Review Flow Example
+
+```text
+🦆  GrumpyDuck — Cleanup Review
+
+Scanning: /Users/you/Downloads
+
+Found:
+
+  📋 Duplicate candidates:    248
+  💿 Installer candidates:    21
+  📦 Large files to review:   5
+  🕰️  Other review candidates: 557
+
+Potential duplicate space: 640.99 MB
+
+⚠️  No files will be modified during this review.
+
+────────────────────────────────────────────────────
+
+🦆  GrumpyDuck: "I found an extra copy. You probably only need one of these."  [1/831]
+
+  3853_40_94_Module_2_AC (2).pptx
+
+  Type:        📄 Document
+  Size:        4.58 MB
+  Location:    /Users/you/Downloads/3853_40_94_Module_2_AC (2).pptx
+  Status:      DUPLICATE (4 identical copies exist)
+  Suggestion:  POTENTIAL CLEANUP
+  Why:
+    • Identical content hash matches other files
+    • Redundant duplicate copy
+
+What should I do?
+  [K] Keep     [C] Mark for cleanup     [S] Skip     [D] Details     [Q] Quit
+
+> C
+────────────────────────────────────────────────────
+
+🦆  GrumpyDuck — Review Complete
+
+  Files reviewed:      1 / 831
+  KEEP:                0
+  Marked for cleanup:  1
+  Skipped:             0
+
+────────────────────────────────────────────────────
+
+Potential space from selected files: 4.58 MB
+
+⚠️  Nothing was deleted.
+   Your cleanup selections are only a plan. No files have been modified.
+```
+
+---
+
+## Cleanup Plan Export Schema
+
+When running `npm start -- review <path> --export plan.json`, the output schema is:
 
 ```json
 {
-  "schemaVersion": "1.0.0",
-  "startedAt": "2026-08-19T03:45:50.596Z",
-  "completedAt": "2026-08-19T03:45:52.322Z",
-  "scannedPath": "/Users/you/Downloads",
-  "config": {
-    "veryLargeBytes": 1073741824,
-    "largeBytes": 524288000,
-    "mediumBytes": 104857600,
-    "veryOldDays": 365,
-    "oldDays": 180,
-    "followSymlinks": false,
-    "includeHidden": true,
-    "bundleExtensions": ["app", "bundle", "framework", "plugin", "kext", "xpc"]
+  "scanPath": "/Users/you/Downloads",
+  "createdAt": "2026-08-20T06:10:00.000Z",
+  "readOnly": true,
+  "summary": {
+    "totalReviewed": 3,
+    "keptCount": 1,
+    "cleanupCount": 1,
+    "skippedCount": 1,
+    "totalSelectedBytes": 4806439
   },
   "files": [
     {
-      "name": "googlechrome.dmg",
-      "path": "/Users/you/Downloads/googlechrome.dmg",
-      "extension": "dmg",
-      "size": 215429120,
-      "createdAt": 1705312200000,
-      "modifiedAt": 1705312200000,
-      "accessedAt": 1705312200000,
-      "category": "Installers",
-      "isHidden": false,
-      "parent": "/Users/you/Downloads",
-      "sizeLabel": "Medium",
-      "ageLabel": "Very Old",
-      "hash": null,
-      "intelligence": {
-        "classification": {
-          "type": "INSTALLER",
-          "confidence": 0.98
-        },
-        "confidenceLevel": "High",
-        "recommendation": {
-          "action": "REVIEW",
-          "reason": "This appears to be an application installer stored in Downloads.",
-          "reasons": [
-            "DMG installer",
-            "Located in Downloads",
-            "205.45 MB",
-            "May no longer be required if the application is already installed"
-          ]
-        },
-        "observations": ["LARGE", "OLD", "INSTALLER", "DOWNLOADS_LOCATION"],
-        "isDuplicate": false
-      }
+      "path": "/Users/you/Downloads/3853_40_94_Module_2_AC (2).pptx",
+      "name": "3853_40_94_Module_2_AC (2).pptx",
+      "size": 4806439,
+      "classification": "DOCUMENT",
+      "recommendation": "POTENTIAL_CLEANUP",
+      "userDecision": "CLEANUP",
+      "reasons": [
+        "Identical content hash matches other files",
+        "Redundant duplicate copy"
+      ]
     }
   ],
-  "emptyDirectories": [
-    "/Users/you/Downloads/old-project"
-  ],
-  "duplicateGroups": [
-    {
-      "hash": "a1b2c3d4...",
-      "size": 2516582,
-      "files": [...]
-    }
-  ],
-  "errors": [],
-  "summary": {
-    "totalFiles": 1383,
-    "logicalItemsScanned": 1383,
-    "physicalFilesScanned": 1383,
-    "physicalDirectoriesScanned": 118,
-    "totalDirectories": 118,
-    "totalBytes": 10103741824,
-    "largeFileCount": 17,
-    "largeFileBytes": 6345897600,
-    "oldFileCount": 641,
-    "oldFileBytes": 6732857625,
-    "duplicateGroupCount": 224,
-    "duplicateWastedBytes": 672124928,
-    "potentialCleanupBytes": 8632832000,
-    "smartCleanupBytes": 546242560,
-    "categories": [
-      { "category": "Installers", "count": 20, "totalBytes": 4337917952 },
-      { "category": "Documents", "count": 400, "totalBytes": 1728708608 }
-    ],
-    "intelligenceSummary": {
-      "categories": {
-        "DOCUMENT": 400,
-        "DATASET": 18,
-        "INSTALLER": 20,
-        "DEVELOPMENT_ARTIFACT": 4,
-        "APPLICATION": 2
-      },
-      "recommendations": {
-        "KEEP": 612,
-        "REVIEW": 519,
-        "POTENTIAL_CLEANUP": 248,
-        "IGNORE": 4
-      }
-    }
-  }
+  "totalSelectedBytes": 4806439
 }
 ```
 
 ---
 
-## Safety Limitations
+## Safety Limitations & Protected Paths
 
 GrumpyDuck is **strictly read-only**. It will never:
 
-- Delete files
+- Delete files (`fs.unlink`, `fs.rm`, `trash`)
 - Move or rename files
 - Modify file contents or metadata
 - Empty Trash
 - Change file permissions
-- Upload files anywhere
-- Send file contents to any external service
-- Automatically mark files as safe to delete
+- Send file contents to external services
 
-**Labels used:**
-- `KEEP` — Identified as active user file, application bundle, or valuable dataset.
-- `REVIEW` — File worth user attention (old files, installers in Downloads, large videos, etc.).
-- `POTENTIAL_CLEANUP` — Identical duplicate copies or clear redundancy candidates.
-- `IGNORE` — Build dependencies, package caches, and system internals.
+### Protected System Paths
 
-The label `SAFE_TO_DELETE` is **never used**.
+GrumpyDuck includes a safety verification layer (`src/safety/protectedPaths.ts`) that protects:
+- `/System`, `/Library`, `/usr`, `/bin`, `/sbin`, `/etc`, `/dev`, `/var`, `/private`
+- User sensitive security directories (e.g. `~/Library/Keychains`)
+- Root filesystem `/`
 
 ---
 
@@ -378,7 +249,16 @@ grumpyduck/
 │
 ├── src/
 │   ├── cli/
-│   │   └── index.ts               CLI entry point (commander)
+│   │   └── index.ts               CLI entry point (`scan`, `review`)
+│   │
+│   ├── review/
+│   │   ├── reviewer.ts            Interactive review engine & candidate extractor
+│   │   ├── session.ts             In-memory review session state manager
+│   │   ├── display.ts             CLI UI formatting & details view
+│   │   └── export.ts              Cleanup plan JSON builder and exporter
+│   │
+│   ├── safety/
+│   │   └── protectedPaths.ts      System & security protected path verification
 │   │
 │   ├── intelligence/
 │   │   ├── index.ts               Main intelligence orchestrator & summary builder
@@ -400,6 +280,7 @@ grumpyduck/
 │   │   └── jsonReport.ts          Stable JSON serialisation
 │   │
 │   ├── types/
+│   │   ├── review.ts              Review items, decisions, session state, export schema
 │   │   ├── intelligence.ts        Enums & types for classification, confidence, recommendations
 │   │   └── scanner.ts             Shared scanner TypeScript interfaces
 │   │
@@ -409,6 +290,8 @@ grumpyduck/
 │       └── hash.ts                Streaming SHA-256 (256 KB chunks)
 │
 ├── tests/
+│   ├── safety.test.ts             Protected paths and safety test suite
+│   ├── review.test.ts             Interactive review, prioritization & export test suite
 │   ├── intelligence.test.ts       Vitest intelligence test suite (12 test groups)
 │   └── scanner.test.ts            Vitest scanner test suite (48 test groups)
 │
@@ -423,7 +306,7 @@ grumpyduck/
 ## Running Tests
 
 ```bash
-# Run all tests once (60 tests)
+# Run all tests once (66 tests across 4 test suites)
 npm test
 
 # Watch mode during development
@@ -436,27 +319,11 @@ Tests use temporary directories created with `os.tmpdir()`. No real user files a
 
 ## Tauri Integration Guide
 
-GrumpyDuck's scanner was designed from the start to serve as the backend of a Tauri desktop application.
+GrumpyDuck's scanner and review modules are ready to integrate directly with desktop UI frameworks like Tauri.
 
-### Step 1 — Use the scanner as a Tauri command
-
-In your Tauri Rust backend, invoke the Node.js CLI as a sidecar, or write a Tauri command using the same JSON contract. The `schemaVersion` field ensures safe frontend migrations.
-
-### Step 2 — Consume the JSON report in the Tauri frontend
-
-```typescript
-import { invoke } from '@tauri-apps/api/core';
-
-const result = await invoke<ScanResult>('scan_directory', { path: '~/Downloads' });
-
-// result.summary.intelligenceSummary
-// result.files[0].intelligence.recommendation
-// result.files[0].intelligence.confidenceLevel
-```
-
-### Step 3 — Import shared types
-
-Copy `src/types/scanner.ts` and `src/types/intelligence.ts` into your Tauri frontend `src/` directory. All interfaces are designed for seamless JSON serialisation.
+1. **Scan Command**: Invoke `scan()` to retrieve typed `ScanResult` with full intelligence metadata.
+2. **Review Command**: Extract prioritized candidates with `extractReviewCandidates()` and manage UI review queue using `ReviewSession`.
+3. **Export & Actions**: Generate actionable cleanup plans using `buildCleanupPlan()`.
 
 ---
 
