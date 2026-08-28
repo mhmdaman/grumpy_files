@@ -11,6 +11,8 @@
     "build": "tsc",
     "start": "node dist/cli/index.js",
     "dev": "ts-node src/cli/index.ts",
+    "pet": "npm run pet:build && electron dist-electron/electron/main/desktopPet.js",
+    "pet:build": "tsc -p electron.tsconfig.json && cp -r src/electron/renderer dist-electron/electron/",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit"
@@ -29,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "electron": "^44.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
