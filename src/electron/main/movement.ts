@@ -5,6 +5,7 @@
 import { BrowserWindow, screen } from 'electron';
 import { AnimationState } from './spriteConfig';
 import { savePetPosition } from './positionStore';
+import { SurfaceLedge } from './surfaceDetector';
 
 export interface MovementOptions {
   minIdleSeconds?: number;
@@ -26,12 +27,23 @@ export class MovementController {
   private walkInterval: NodeJS.Timeout | null = null;
   private currentState: AnimationState = 'IDLE';
 
+  // Active walking surface / ledge
+  private currentLedge: SurfaceLedge | null = null;
+
   constructor(window: BrowserWindow, options: MovementOptions) {
     this.window = window;
-    this.minIdleTimeMs = (options.minIdleSeconds ?? 5) * 1000;
-    this.maxIdleTimeMs = (options.maxIdleSeconds ?? 15) * 1000;
-    this.speedPxPerSec = options.speedPixelsPerSecond ?? 70;
+    this.minIdleTimeMs = (options.minIdleSeconds ?? 4) * 1000;
+    this.maxIdleTimeMs = (options.maxIdleSeconds ?? 10) * 1000;
+    this.speedPxPerSec = options.speedPixelsPerSecond ?? 60;
     this.onStateChange = options.onStateChange;
+  }
+
+  public setLedge(ledge: SurfaceLedge): void {
+    this.currentLedge = ledge;
+  }
+
+  public getLedge(): SurfaceLedge | null {
+    return this.currentLedge;
   }
 
   public start(): void {
@@ -93,7 +105,7 @@ export class MovementController {
     if (!this.isRunning || this.isPaused) return;
 
     this.clearTimers();
-    // Variable lifelike idle pause duration (3.5s to 9s)
+    // Variable lifelike idle pause duration (3s to 8s)
     const waitTime = Math.floor(
       Math.random() * (this.maxIdleTimeMs - this.minIdleTimeMs + 1) + this.minIdleTimeMs
     );
@@ -110,53 +122,47 @@ export class MovementController {
     const display = screen.getDisplayMatching(bounds);
     const workArea = display.workArea;
 
-    // Safety margins from screen edges
-    const marginX = 25;
-    const minX = workArea.x + marginX;
-    const maxX = workArea.x + workArea.width - bounds.width - marginX;
+    // Horizontal bounds: constrained by current surface/widget ledge, or screen floor
+    let minX = workArea.x + 15;
+    let maxX = workArea.x + workArea.width - bounds.width - 15;
 
-    // Natural desktop "floor" roaming zone: bottom region of display
-    const bottomFloorY = workArea.y + workArea.height - bounds.height - 35;
-    const minY = Math.max(workArea.y + marginX, bottomFloorY - 140);
-    const maxY = bottomFloorY;
+    if (this.currentLedge) {
+      minX = Math.max(workArea.x + 10, this.currentLedge.minX);
+      maxX = Math.min(workArea.x + workArea.width - bounds.width - 10, this.currentLedge.maxX - bounds.width);
+    }
+
+    // If ledge is too narrow, clamp to screen width
+    if (maxX <= minX + 20) {
+      minX = workArea.x + 15;
+      maxX = workArea.x + workArea.width - bounds.width - 15;
+    }
 
     const currentX = bounds.x;
+    // Strict horizontal walking: maintain constant Y altitude on the surface
     const currentY = bounds.y;
 
-    // Decide travel distance based on natural duck behavior:
-    // 60% short micro-waddle (50-130px), 30% medium explore (140-280px), 10% cross-desk patrol (300-500px)
-    const rand = Math.random();
-    let walkDist = rand < 0.6
-      ? 50 + Math.random() * 80
-      : rand < 0.9
-      ? 140 + Math.random() * 140
-      : 300 + Math.random() * 200;
+    // Decide travel distance based on available surface width
+    const ledgeWidth = maxX - minX;
+    const maxStepDist = Math.min(ledgeWidth * 0.75, 260);
 
-    // Direction: pick left or right, biasing away from screen edges
+    const rand = Math.random();
+    const walkDist = Math.max(35, Math.min(maxStepDist, rand < 0.6 ? 45 + Math.random() * 65 : 120 + Math.random() * 120));
+
+    // Choose direction, turning around if close to ledge edges
     let direction = Math.random() < 0.5 ? 1 : -1;
-    if (currentX < minX + 150) {
-      direction = 1; // Walk right if too close to left edge
-    } else if (currentX > maxX - 150) {
-      direction = -1; // Walk left if too close to right edge
+    if (currentX <= minX + 30) {
+      direction = 1; // Must walk right
+    } else if (currentX >= maxX - 30) {
+      direction = -1; // Must walk left
     }
 
     let targetX = Math.round(currentX + direction * walkDist);
     targetX = Math.max(minX, Math.min(maxX, targetX));
 
-    // Ducks primarily stay near the bottom desk floor with gentle micro-hops
-    // Target Y stays near ground or shifts slightly by ±15px
-    let targetY = Math.round(currentY + (Math.random() * 30 - 15));
-    // If pet drifted up, bias it back towards ground floor
-    if (currentY < bottomFloorY - 60) {
-      targetY += 35;
-    }
-    targetY = Math.max(minY, Math.min(maxY, targetY));
-
     const deltaX = targetX - currentX;
-    const deltaY = targetY - currentY;
-    const distance = Math.hypot(deltaX, deltaY);
+    const distance = Math.abs(deltaX);
 
-    if (distance < 25) {
+    if (distance < 20) {
       this.scheduleNextWalk();
       return;
     }
@@ -166,14 +172,12 @@ export class MovementController {
     this.setState(walkState);
 
     const stepIntervalMs = 16; // ~60 FPS smooth updates
-    // Variable natural walking speed (approx 55-75 px/s with slight variation)
-    const speed = this.speedPxPerSec * (0.85 + Math.random() * 0.3);
+    const speed = this.speedPxPerSec;
     const durationMs = (distance / speed) * 1000;
-    const totalSteps = Math.max(15, Math.ceil(durationMs / stepIntervalMs));
+    const totalSteps = Math.max(12, Math.ceil(durationMs / stepIntervalMs));
     let step = 0;
 
     const startX = currentX;
-    const startY = currentY;
 
     this.walkInterval = setInterval(() => {
       if (!this.isRunning || this.isPaused || this.window.isDestroyed()) {
@@ -184,16 +188,14 @@ export class MovementController {
       step++;
       const progress = Math.min(1, step / totalSteps);
 
-      // Organic ease-in-out curve with subtle footstep momentum
+      // Smooth kinematic ease for realistic duck waddling start and stop
       const eased = progress < 0.5
         ? 2 * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 2) / 2;
 
-      // Realistic duck waddle: subtle horizontal footstep modulation
-      const footstepWaddle = Math.sin(progress * Math.PI * (distance / 25)) * 0.8;
-
       const newX = Math.round(startX + deltaX * eased);
-      const newY = Math.round(startY + deltaY * eased + footstepWaddle);
+      // Strictly horizontal: newY stays identical to currentY on the ledge
+      const newY = currentY;
 
       try {
         this.window.setPosition(newX, newY);

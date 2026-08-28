@@ -69,28 +69,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ── Mouse Interaction & Dragging ──────────────────────────────────────────
   let isPointerDown = false;
   let hasMoved = false;
-  let startX = 0;
-  let startY = 0;
+  let startScreenX = 0;
+  let startScreenY = 0;
+  let startWinX = 0;
+  let startWinY = 0;
 
-  duckWrapper.addEventListener('mousedown', (e) => {
+  duckWrapper.addEventListener('pointerdown', (e) => {
     // Right click handled by contextmenu
     if (e.button === 2) return;
 
     isPointerDown = true;
     hasMoved = false;
-    startX = e.screenX;
-    startY = e.screenY;
+    startScreenX = e.screenX;
+    startScreenY = e.screenY;
+    startWinX = window.screenX;
+    startWinY = window.screenY;
+
+    try {
+      duckWrapper.setPointerCapture(e.pointerId);
+    } catch {}
 
     if (window.grumpyDuckApi?.notifyDragStart) {
       window.grumpyDuckApi.notifyDragStart();
     }
   });
 
-  window.addEventListener('mousemove', (e) => {
+  duckWrapper.addEventListener('pointermove', (e) => {
     if (!isPointerDown) return;
 
-    const deltaX = e.screenX - startX;
-    const deltaY = e.screenY - startY;
+    const deltaX = e.screenX - startScreenX;
+    const deltaY = e.screenY - startScreenY;
 
     if (Math.hypot(deltaX, deltaY) > 3) {
       if (!hasMoved) {
@@ -99,30 +107,39 @@ document.addEventListener('DOMContentLoaded', async () => {
         duckWrapper.classList.remove('is-landing');
       }
 
-      startX = e.screenX;
-      startY = e.screenY;
+      const targetWinX = startWinX + deltaX;
+      const targetWinY = startWinY + deltaY;
 
-      // Request window position adjustment
-      if (window.grumpyDuckApi?.notifyDragEnd) {
-        window.grumpyDuckApi.notifyDragEnd({
-          x: window.screenX + deltaX,
-          y: window.screenY + deltaY,
+      if (window.grumpyDuckApi?.notifyDragMove) {
+        window.grumpyDuckApi.notifyDragMove({
+          x: targetWinX,
+          y: targetWinY,
         });
       }
     }
   });
 
-  window.addEventListener('mouseup', (e) => {
+  const handlePointerEnd = (e) => {
     if (!isPointerDown) return;
     isPointerDown = false;
+
+    try {
+      duckWrapper.releasePointerCapture(e.pointerId);
+    } catch {}
 
     if (hasMoved) {
       duckWrapper.classList.remove('is-dragging');
       duckWrapper.classList.add('is-landing');
       setTimeout(() => duckWrapper.classList.remove('is-landing'), 500);
 
+      const deltaX = e.screenX - startScreenX;
+      const deltaY = e.screenY - startScreenY;
+
       if (window.grumpyDuckApi?.notifyDragEnd) {
-        window.grumpyDuckApi.notifyDragEnd();
+        window.grumpyDuckApi.notifyDragEnd({
+          x: startWinX + deltaX,
+          y: startWinY + deltaY,
+        });
       }
     } else {
       // User clicked without dragging — trigger click reaction
@@ -135,7 +152,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.grumpyDuckApi.notifyClick();
       }
     }
-  });
+  };
+
+  duckWrapper.addEventListener('pointerup', handlePointerEnd);
+  duckWrapper.addEventListener('pointercancel', handlePointerEnd);
 
   // Right-click context menu
   duckWrapper.addEventListener('contextmenu', (e) => {

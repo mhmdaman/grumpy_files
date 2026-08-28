@@ -17,6 +17,7 @@ export interface GrumpyDuckApi {
   onBounce: (callback: () => void) => () => void;
   notifyClick: () => void;
   notifyDragStart: () => void;
+  notifyDragMove: (pos: { x: number; y: number }) => void;
   notifyDragEnd: (pos?: { x: number; y: number }) => void;
   showContextMenu: () => void;
   scanDirectory: (path: string) => Promise<void>;
@@ -42,6 +43,7 @@ const api: GrumpyDuckApi = {
   },
   notifyClick: () => ipcRenderer.send('pet:on-click'),
   notifyDragStart: () => ipcRenderer.send('pet:drag-start'),
+  notifyDragMove: (pos) => ipcRenderer.send('pet:drag-move', pos),
   notifyDragEnd: (pos) => ipcRenderer.send('pet:drag-end', pos),
   showContextMenu: () => ipcRenderer.send('pet:show-context-menu'),
   scanDirectory: (path: string) => ipcRenderer.invoke('pet:scan-directory', path),

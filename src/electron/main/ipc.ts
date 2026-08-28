@@ -13,6 +13,8 @@ import { DEFAULT_CONFIG } from '../../scanner/rules';
 import { formatBytes } from '../../utils/formatBytes';
 import { ScanResult } from '../../types/scanner';
 
+import { findNearestLedge } from './surfaceDetector';
+
 const CLICK_MESSAGES = [
   '🐥 What?',
   '🐥 You clicked me.',
@@ -59,16 +61,37 @@ export function setupIpcHandlers(
     movement.pause();
   });
 
-  ipcMain.on('pet:drag-end', (_event, pos: { x: number; y: number }) => {
+  ipcMain.on('pet:drag-move', (_event, pos: { x: number; y: number }) => {
     if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
       window.setPosition(Math.round(pos.x), Math.round(pos.y));
-      savePetPosition({ x: Math.round(pos.x), y: Math.round(pos.y) });
-    } else {
-      const [currX, currY] = window.getPosition();
-      savePetPosition({ x: currX, y: currY });
     }
-    // Resume autonomous roaming after 4 seconds of stillness
-    movement.pause(4000);
+  });
+
+  ipcMain.on('pet:drag-end', async (_event, pos: { x: number; y: number }) => {
+    const [w, h] = window.getSize();
+    const rawX = pos && typeof pos.x === 'number' ? Math.round(pos.x) : window.getPosition()[0];
+    const rawY = pos && typeof pos.y === 'number' ? Math.round(pos.y) : window.getPosition()[1];
+
+    try {
+      // Find nearest walkable surface ledge (widget header, window top, or desktop floor)
+      const { snappedX, snappedY, ledge } = await findNearestLedge(rawX, rawY, w, h, 40);
+      window.setPosition(snappedX, snappedY);
+      savePetPosition({ x: snappedX, y: snappedY });
+      movement.setLedge(ledge);
+
+      if (ledge.isWidget) {
+        window.webContents.send('pet:show-speech', {
+          text: `🐥 Standing on ${ledge.owner || 'widget'}.`,
+          duration: 3000,
+        });
+      }
+    } catch {
+      window.setPosition(rawX, rawY);
+      savePetPosition({ x: rawX, y: rawY });
+    }
+
+    // Resume autonomous horizontal roaming after 3.5 seconds of stillness
+    movement.pause(3500);
   });
 
   // Context menu triggered from renderer right-click

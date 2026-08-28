@@ -95,7 +95,7 @@ html, body {
   justify-content: center;
   cursor: grab;
   -webkit-app-region: no-drag;
-  transform-origin: 50% 90%;
+  transform-origin: 50% 100%;
   transition: filter 0.15s ease;
 }
 
@@ -111,12 +111,12 @@ html, body {
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
   filter: drop-shadow(0 2.5px 5px rgba(0, 0, 0, 0.22));
-  transform-origin: 50% 88%;
+  transform-origin: 50% 100%;
 }
 
-/* ── Lifelike Idle Breathing ─────────────────────────────────────────────── */
+/* ── Lifelike Idle Breathing (Standing Still Grounded) ────────────────────── */
 #duck-wrapper.is-idle #duck-canvas {
-  animation: duck-breathe 3.2s ease-in-out infinite;
+  animation: duck-breathe 3.4s ease-in-out infinite;
 }
 
 @keyframes duck-breathe {
@@ -124,24 +124,24 @@ html, body {
     transform: scale(1, 1);
   }
   50% {
-    transform: scale(1.015, 0.985);
+    transform: scale(1.012, 0.988);
   }
 }
 
-/* ── Lifelike Waddling Locomotion (Side-to-Side Sway) ────────────────────── */
+/* ── Lifelike Waddling Locomotion (Pivoting at Grounded Feet) ─────────────── */
 #duck-wrapper.is-walking {
-  animation: duck-waddle 0.38s ease-in-out infinite alternate;
+  animation: duck-waddle 0.36s ease-in-out infinite alternate;
 }
 
 @keyframes duck-waddle {
   0% {
-    transform: rotate(-3deg) translateY(0);
+    transform: rotate(-2.5deg) translateY(0);
   }
   50% {
-    transform: rotate(0deg) translateY(-2px);
+    transform: rotate(0deg) translateY(-1.5px);
   }
   100% {
-    transform: rotate(3deg) translateY(0);
+    transform: rotate(2.5deg) translateY(0);
   }
 }
 
