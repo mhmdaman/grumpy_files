@@ -5,13 +5,14 @@
 import { BrowserWindow, screen } from 'electron';
 import { AnimationState } from './spriteConfig';
 import { savePetPosition } from './positionStore';
-import { SurfaceLedge } from './surfaceDetector';
+import { Platform } from './platformDetector';
 
 export interface MovementOptions {
   minIdleSeconds?: number;
   maxIdleSeconds?: number;
-  speedPixelsPerSecond?: number; // Walking speed
+  speedPixelsPerSecond?: number;
   onStateChange: (state: AnimationState) => void;
+  onPlatformChange?: (platform: Platform | null) => void;
 }
 
 export class MovementController {
@@ -20,6 +21,7 @@ export class MovementController {
   private maxIdleTimeMs: number;
   private speedPxPerSec: number;
   private onStateChange: (state: AnimationState) => void;
+  private onPlatformChange?: (platform: Platform | null) => void;
 
   private isRunning: boolean = false;
   private isPaused: boolean = false;
@@ -27,23 +29,25 @@ export class MovementController {
   private walkInterval: NodeJS.Timeout | null = null;
   private currentState: AnimationState = 'IDLE';
 
-  // Active walking surface / ledge
-  private currentLedge: SurfaceLedge | null = null;
+  // Active walking platform
+  private currentPlatform: Platform | null = null;
 
   constructor(window: BrowserWindow, options: MovementOptions) {
     this.window = window;
-    this.minIdleTimeMs = (options.minIdleSeconds ?? 4) * 1000;
-    this.maxIdleTimeMs = (options.maxIdleSeconds ?? 10) * 1000;
+    this.minIdleTimeMs = (options.minIdleSeconds ?? 5) * 1000;
+    this.maxIdleTimeMs = (options.maxIdleSeconds ?? 12) * 1000;
     this.speedPxPerSec = options.speedPixelsPerSecond ?? 60;
     this.onStateChange = options.onStateChange;
+    this.onPlatformChange = options.onPlatformChange;
   }
 
-  public setLedge(ledge: SurfaceLedge): void {
-    this.currentLedge = ledge;
+  public setPlatform(platform: Platform): void {
+    this.currentPlatform = platform;
+    this.onPlatformChange?.(platform);
   }
 
-  public getLedge(): SurfaceLedge | null {
-    return this.currentLedge;
+  public getPlatform(): Platform | null {
+    return this.currentPlatform;
   }
 
   public start(): void {
@@ -105,7 +109,6 @@ export class MovementController {
     if (!this.isRunning || this.isPaused) return;
 
     this.clearTimers();
-    // Variable lifelike idle pause duration (3s to 8s)
     const waitTime = Math.floor(
       Math.random() * (this.maxIdleTimeMs - this.minIdleTimeMs + 1) + this.minIdleTimeMs
     );
@@ -122,47 +125,50 @@ export class MovementController {
     const display = screen.getDisplayMatching(bounds);
     const workArea = display.workArea;
 
-    // Horizontal bounds: constrained by current surface/widget ledge, or screen floor
     let minX = workArea.x + 15;
     let maxX = workArea.x + workArea.width - bounds.width - 15;
 
-    if (this.currentLedge) {
-      minX = Math.max(workArea.x + 10, this.currentLedge.minX);
-      maxX = Math.min(workArea.x + workArea.width - bounds.width - 10, this.currentLedge.maxX - bounds.width);
+    if (this.currentPlatform) {
+      minX = Math.max(workArea.x + 10, this.currentPlatform.minX);
+      maxX = Math.min(
+        workArea.x + workArea.width - bounds.width - 10,
+        this.currentPlatform.maxX - bounds.width
+      );
     }
 
-    // If ledge is too narrow, clamp to screen width
+    // Safety fallback if platform bounds are inverted
     if (maxX <= minX + 20) {
       minX = workArea.x + 15;
       maxX = workArea.x + workArea.width - bounds.width - 15;
     }
 
     const currentX = bounds.x;
-    // Strict horizontal walking: maintain constant Y altitude on the surface
     const currentY = bounds.y;
 
-    // Decide travel distance based on available surface width
-    const ledgeWidth = maxX - minX;
-    const maxStepDist = Math.min(ledgeWidth * 0.75, 260);
+    const platformWidth = maxX - minX;
+    const maxTravel = Math.min(platformWidth * 0.7, 240);
 
     const rand = Math.random();
-    const walkDist = Math.max(35, Math.min(maxStepDist, rand < 0.6 ? 45 + Math.random() * 65 : 120 + Math.random() * 120));
+    const travelDist = Math.max(
+      35,
+      Math.min(maxTravel, rand < 0.6 ? 50 + Math.random() * 60 : 110 + Math.random() * 110)
+    );
 
-    // Choose direction, turning around if close to ledge edges
+    // Pick direction, reversing if close to edges
     let direction = Math.random() < 0.5 ? 1 : -1;
-    if (currentX <= minX + 30) {
-      direction = 1; // Must walk right
-    } else if (currentX >= maxX - 30) {
-      direction = -1; // Must walk left
+    if (currentX <= minX + 25) {
+      direction = 1;
+    } else if (currentX >= maxX - 25) {
+      direction = -1;
     }
 
-    let targetX = Math.round(currentX + direction * walkDist);
+    let targetX = Math.round(currentX + direction * travelDist);
     targetX = Math.max(minX, Math.min(maxX, targetX));
 
     const deltaX = targetX - currentX;
     const distance = Math.abs(deltaX);
 
-    if (distance < 20) {
+    if (distance < 15) {
       this.scheduleNextWalk();
       return;
     }
@@ -171,12 +177,10 @@ export class MovementController {
     const walkState: AnimationState = deltaX >= 0 ? 'WALK_RIGHT' : 'WALK_LEFT';
     this.setState(walkState);
 
-    const stepIntervalMs = 16; // ~60 FPS smooth updates
-    const speed = this.speedPxPerSec;
-    const durationMs = (distance / speed) * 1000;
+    const stepIntervalMs = 16;
+    const durationMs = (distance / this.speedPxPerSec) * 1000;
     const totalSteps = Math.max(12, Math.ceil(durationMs / stepIntervalMs));
     let step = 0;
-
     const startX = currentX;
 
     this.walkInterval = setInterval(() => {
@@ -188,13 +192,13 @@ export class MovementController {
       step++;
       const progress = Math.min(1, step / totalSteps);
 
-      // Smooth kinematic ease for realistic duck waddling start and stop
-      const eased = progress < 0.5
-        ? 2 * progress * progress
-        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      // Smooth kinematic easing
+      const eased =
+        progress < 0.5
+          ? 2 * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 2) / 2;
 
       const newX = Math.round(startX + deltaX * eased);
-      // Strictly horizontal: newY stays identical to currentY on the ledge
       const newY = currentY;
 
       try {

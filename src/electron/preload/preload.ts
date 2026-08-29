@@ -9,10 +9,20 @@ export interface SpeechData {
   duration?: number;
 }
 
+export interface DebugData {
+  isDebug: boolean;
+  state: string;
+  platform: any;
+  position: { x: number; y: number };
+}
+
 export interface GrumpyDuckApi {
   getSpriteConfigs: () => Promise<any>;
   getInitialState: () => Promise<string>;
+  getDebugState: () => Promise<DebugData>;
   onStateChanged: (callback: (state: string) => void) => () => void;
+  onPlatformChanged: (callback: (platform: any) => void) => () => void;
+  onDebugChanged: (callback: (debug: DebugData) => void) => () => void;
   onShowSpeech: (callback: (data: SpeechData) => void) => () => void;
   onBounce: (callback: () => void) => () => void;
   notifyClick: () => void;
@@ -26,10 +36,21 @@ export interface GrumpyDuckApi {
 const api: GrumpyDuckApi = {
   getSpriteConfigs: () => ipcRenderer.invoke('pet:get-sprite-configs'),
   getInitialState: () => ipcRenderer.invoke('pet:get-state'),
+  getDebugState: () => ipcRenderer.invoke('pet:get-debug-state'),
   onStateChanged: (callback) => {
     const handler = (_event: any, state: string) => callback(state);
     ipcRenderer.on('pet:state-changed', handler);
     return () => ipcRenderer.removeListener('pet:state-changed', handler);
+  },
+  onPlatformChanged: (callback) => {
+    const handler = (_event: any, platform: any) => callback(platform);
+    ipcRenderer.on('pet:platform-changed', handler);
+    return () => ipcRenderer.removeListener('pet:platform-changed', handler);
+  },
+  onDebugChanged: (callback) => {
+    const handler = (_event: any, debug: DebugData) => callback(debug);
+    ipcRenderer.on('pet:debug-changed', handler);
+    return () => ipcRenderer.removeListener('pet:debug-changed', handler);
   },
   onShowSpeech: (callback) => {
     const handler = (_event: any, data: SpeechData) => callback(data);

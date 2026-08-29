@@ -1,8 +1,18 @@
-# 🦆 GrumpyDuck — Phase 4: Safe Cleanup, Trash Integration & Undo
+# 🦆 GrumpyDuck — Desktop Pet & Safe Cleanup
 
 > A read-only local file-organisation assistant that tells you the truth about your storage.
 
-GrumpyDuck scans a directory, analyses its contents, interprets file purpose and context, and provides an interactive review session allowing you to curate a cleanup plan. It then executes the cleanup by strictly moving files to the **macOS Trash**, while maintaining zero permanent filesystem deletions. It is a duck, not a broom.
+GrumpyDuck is a small desktop pet and local file-organisation assistant. It scans a directory, analyses its contents, interprets file purpose and context, and provides an interactive review session allowing you to curate a cleanup plan. It then executes the cleanup by strictly moving files to the **macOS Trash**, while maintaining zero permanent filesystem deletions. It is a duck, not a broom.
+
+---
+
+## What's New in Phase 5: Desktop Pet
+
+- **Tiny transparent companion**: Launch a frameless, always-on-top Electron pet that is small enough to live unobtrusively on the desktop.
+- **Native animated GIFs**: The pet uses the supplied idle, left-walk, right-walk, and scanning GIF assets directly, with source alpha preserved.
+- **Honest platform walking**: On macOS, the only automatic platform is a conservatively inferred bottom Dock. Finder desktop icons and desktop widgets are not claimed as detected.
+- **Real scan reactions**: Triggering a scan from the pet uses the existing scanner and reports only the results it actually receives.
+- **Development visibility**: An opt-in debug mode exposes registered platforms and pet state, and permits temporary manual test surfaces.
 
 ---
 
@@ -24,6 +34,11 @@ GrumpyDuck scans a directory, analyses its contents, interprets file purpose and
 ## Table of Contents
 
 - [Installation](#installation)
+- [Desktop Pet (Phase 5)](#desktop-pet-phase-5)
+  - [Launch the pet](#launch-the-pet)
+  - [Transparent GIF assets](#transparent-gif-assets)
+  - [Walking platforms and detection limits](#walking-platforms-and-detection-limits)
+  - [Debug mode and manual test surfaces](#debug-mode-and-manual-test-surfaces)
 - [Usage](#usage)
 - [CLI Commands](#cli-commands)
   - [`scan <directory>`](#scan-directory)

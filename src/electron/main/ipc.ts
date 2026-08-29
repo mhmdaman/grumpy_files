@@ -1,62 +1,63 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// GrumpyDuck — IPC Handlers & Scanner Bridge
+// GrumpyDuck — Desktop Pet IPC Handlers & File Intelligence Bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { ipcMain, BrowserWindow, dialog, Menu, MenuItemConstructorOptions } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import { MovementController } from './movement';
-import { SPRITE_CONFIGS, AnimationState } from './spriteConfig';
+import { SPRITE_CONFIGS } from './spriteConfig';
 import { savePetPosition } from './positionStore';
+import { findNearestPlatform, Platform } from './platformDetector';
 import { scan } from '../../scanner/scanner';
 import { DEFAULT_CONFIG } from '../../scanner/rules';
 import { formatBytes } from '../../utils/formatBytes';
 import { ScanResult } from '../../types/scanner';
 
-import { findNearestLedge } from './surfaceDetector';
-
-const CLICK_MESSAGES = [
-  '🐥 What?',
-  '🐥 You clicked me.',
-  '🐥 I\'m working.',
-  '🐥 Stop disturbing me.',
-  '🐥 Do you mind?',
-  '🐥 I am keeping an eye on your storage.',
-  '🐥 Quack. Need something scanned?',
-];
-
 const IDLE_QUIPS = [
-  '🐥 Hmm…',
-  '🐥 So much clutter in the world…',
-  '🐥 I wonder how many duplicate files you have…',
-  '🐥 Just patrolling the desktop.',
-  '🐥 *grumpy sigh*',
+  "Quack. Still 0 bytes deleted today.",
+  "I'm keeping an eye on your Downloads folder.",
+  "Your disk space isn't getting any bigger.",
+  "Duplicate files are a duck's natural enemy.",
+  "Tidiness is not optional.",
+  "Did you know old disk images attract digital dust?",
+  "Standing by for file organization duties.",
 ];
 
 export function setupIpcHandlers(
   window: BrowserWindow,
-  movement: MovementController
+  movement: MovementController,
+  initialDebug: boolean = false
 ): { triggerScan: (dir: string) => Promise<void> } {
-  // Renderer requests initial sprite configuration
+  let isDebugMode = initialDebug;
+
+  // Handlers for renderer initialization
   ipcMain.handle('pet:get-sprite-configs', () => {
     return SPRITE_CONFIGS;
   });
 
-  // Renderer requests current state
   ipcMain.handle('pet:get-state', () => {
     return movement.getCurrentState();
   });
 
-  // Renderer signals a click on the duck
-  ipcMain.on('pet:on-click', () => {
-    // Pause movement for 5 seconds on click
-    movement.pause(5000);
-
-    const message = CLICK_MESSAGES[Math.floor(Math.random() * CLICK_MESSAGES.length)];
-    window.webContents.send('pet:show-speech', { text: message, duration: 3500 });
+  ipcMain.handle('pet:get-debug-state', () => {
+    const pos = window.getPosition();
+    return {
+      isDebug: isDebugMode,
+      state: movement.getCurrentState(),
+      platform: movement.getPlatform(),
+      position: { x: pos[0], y: pos[1] },
+    };
   });
 
-  // Drag handling
+  // Renderer click interaction
+  ipcMain.on('pet:on-click', () => {
+    movement.pause(2500);
+    const quip = IDLE_QUIPS[Math.floor(Math.random() * IDLE_QUIPS.length)];
+    window.webContents.send('pet:show-speech', { text: quip, duration: 3200 });
+  });
+
+  // Drag start / move / end
   ipcMain.on('pet:drag-start', () => {
     movement.pause();
   });
@@ -67,21 +68,26 @@ export function setupIpcHandlers(
     }
   });
 
-  ipcMain.on('pet:drag-end', async (_event, pos: { x: number; y: number }) => {
+  ipcMain.on('pet:drag-end', (_event, pos: { x: number; y: number }) => {
     const [w, h] = window.getSize();
     const rawX = pos && typeof pos.x === 'number' ? Math.round(pos.x) : window.getPosition()[0];
     const rawY = pos && typeof pos.y === 'number' ? Math.round(pos.y) : window.getPosition()[1];
 
     try {
-      // Find nearest walkable surface ledge (widget header, window top, or desktop floor)
-      const { snappedX, snappedY, ledge } = await findNearestLedge(rawX, rawY, w, h, 40);
-      window.setPosition(snappedX, snappedY);
-      savePetPosition({ x: snappedX, y: snappedY });
-      movement.setLedge(ledge);
+      // Find nearest walkable platform (Dock, manual platform, or screen floor)
+      const snap = findNearestPlatform(rawX, rawY, w, h, 60);
+      window.setPosition(snap.snappedX, snap.snappedY);
+      savePetPosition({ x: snap.snappedX, y: snap.snappedY });
+      movement.setPlatform(snap.platform);
 
-      if (ledge.isWidget) {
+      if (snap.platform.type === 'DOCK') {
         window.webContents.send('pet:show-speech', {
-          text: `🐥 Standing on ${ledge.owner || 'widget'}.`,
+          text: '🐥 Docked on macOS Dock.',
+          duration: 3000,
+        });
+      } else if (snap.platform.type === 'MANUAL') {
+        window.webContents.send('pet:show-speech', {
+          text: `🐥 On ${snap.platform.name}.`,
           duration: 3000,
         });
       }
@@ -90,11 +96,10 @@ export function setupIpcHandlers(
       savePetPosition({ x: rawX, y: rawY });
     }
 
-    // Resume autonomous horizontal roaming after 3.5 seconds of stillness
-    movement.pause(3500);
+    movement.pause(3000);
   });
 
-  // Context menu triggered from renderer right-click
+  // Context menu
   ipcMain.on('pet:show-context-menu', () => {
     const defaultDownloads = path.join(os.homedir(), 'Downloads');
     const defaultHome = os.homedir();
@@ -127,6 +132,19 @@ export function setupIpcHandlers(
       },
       { type: 'separator' },
       {
+        label: isDebugMode ? '✓ Debug Mode Enabled' : 'Enable Debug Overlay',
+        click: () => {
+          isDebugMode = !isDebugMode;
+          const pos = window.getPosition();
+          window.webContents.send('pet:debug-changed', {
+            isDebug: isDebugMode,
+            state: movement.getCurrentState(),
+            platform: movement.getPlatform(),
+            position: { x: pos[0], y: pos[1] },
+          });
+        },
+      },
+      {
         label: 'Random Thought',
         click: () => {
           const quip = IDLE_QUIPS[Math.floor(Math.random() * IDLE_QUIPS.length)];
@@ -139,8 +157,10 @@ export function setupIpcHandlers(
           const { getDefaultPosition } = require('./positionStore');
           const [w, h] = window.getSize();
           const pos = getDefaultPosition(w, h);
-          window.setPosition(pos.x, pos.y);
-          savePetPosition(pos);
+          const snap = findNearestPlatform(pos.x, pos.y, w, h, 60);
+          window.setPosition(snap.snappedX, snap.snappedY);
+          savePetPosition({ x: snap.snappedX, y: snap.snappedY });
+          movement.setPlatform(snap.platform);
         },
       },
       { type: 'separator' },
@@ -154,27 +174,24 @@ export function setupIpcHandlers(
     menu.popup({ window });
   });
 
-  // Scanner execution function
+  // Scanner execution function with full intelligence integration
   async function triggerScan(directory: string): Promise<void> {
     const resolvedDir = directory.startsWith('~')
       ? path.join(os.homedir(), directory.slice(1))
       : path.resolve(directory);
 
-    // Pause roaming movement while scanning
     movement.pause();
     movement.setState('SCANNING');
 
-    // Notify renderer
     window.webContents.send('pet:state-changed', 'SCANNING');
     window.webContents.send('pet:show-speech', {
-      text: `🐥 I'm investigating ${path.basename(resolvedDir)}…`,
+      text: `🐥 Investigating ${path.basename(resolvedDir)}…`,
       duration: 5000,
     });
 
     try {
       const result: ScanResult = await scan(resolvedDir, DEFAULT_CONFIG);
 
-      // Analyze real results
       const dupCount = result.summary.duplicateGroupCount;
       const dupWasted = result.summary.duplicateWastedBytes;
       const totalFiles = result.summary.totalFiles;
@@ -183,14 +200,13 @@ export function setupIpcHandlers(
       let resultMessage = `🐥 Scanned ${totalFiles} files.`;
 
       if (dupCount > 0) {
-        resultMessage = `🐥 I found ${dupCount} duplicate group${dupCount === 1 ? '' : 's'} (${formatBytes(dupWasted)} wasted).`;
+        resultMessage = `🐥 Found ${dupCount} duplicate group${dupCount === 1 ? '' : 's'} (${formatBytes(dupWasted)} wasted).`;
       } else if (largeCount > 0) {
         resultMessage = `🐥 Scanned ${totalFiles} files. Found ${largeCount} large files.`;
       } else {
-        resultMessage = `🐥 Scanned ${totalFiles} files. Everything looks clean.`;
+        resultMessage = `🐥 Scanned ${totalFiles} files. Clean!`;
       }
 
-      // Return to IDLE
       movement.setState('IDLE');
       window.webContents.send('pet:state-changed', 'IDLE');
       window.webContents.send('pet:show-speech', {
@@ -198,13 +214,11 @@ export function setupIpcHandlers(
         duration: 6000,
       });
 
-      // Small celebration/acknowledgment window bounce
       window.webContents.send('pet:bounce');
 
-      // Resume roaming after 8 seconds
       setTimeout(() => {
         movement.resume();
-      }, 8000);
+      }, 7000);
     } catch (err: unknown) {
       const error = err as Error;
       movement.setState('IDLE');
@@ -219,7 +233,6 @@ export function setupIpcHandlers(
     }
   }
 
-  // Handle scan start from renderer if invoked
   ipcMain.handle('pet:scan-directory', async (_event, dir: string) => {
     await triggerScan(dir);
   });

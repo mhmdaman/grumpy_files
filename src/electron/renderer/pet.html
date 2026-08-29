@@ -11,13 +11,19 @@
     <!-- Speech bubble container -->
     <div id="speech-bubble-container" aria-live="polite"></div>
 
+    <!-- Debug mode overlay -->
+    <div id="debug-overlay" class="debug-overlay hidden">
+      <div id="debug-state" class="debug-text">State: IDLE</div>
+      <div id="debug-platform" class="debug-text">Platform: macOS Dock</div>
+    </div>
+
     <!-- Duck Character Wrapper -->
     <div id="duck-wrapper" title="GrumpyDuck (Right-click for options)">
-      <canvas id="duck-canvas" width="75" height="72"></canvas>
+      <img id="duck-img" class="duck-sprite" alt="GrumpyDuck" draggable="false">
     </div>
   </div>
 
-  <script src="SpriteAnimator.js"></script>
+  <script src="GifAnimator.js"></script>
   <script src="SpeechBubble.js"></script>
   <script src="GrumpyDuck.js"></script>
 </body>
