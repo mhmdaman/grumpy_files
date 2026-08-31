@@ -67,6 +67,9 @@ export async function detectDuplicates(
     const byHash = new Map<string, FileMetadata[]>();
 
     for (const file of sizeGroup) {
+      // Yield to event loop to keep UI thread fluid and responsive
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
       let digest: string;
       try {
         digest = await hashFile(file.path);

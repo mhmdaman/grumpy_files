@@ -7,6 +7,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 export interface SpeechData {
   text: string;
   duration?: number;
+  buttonText?: string;
+  action?: string;
 }
 
 export interface DebugData {
@@ -31,6 +33,13 @@ export interface GrumpyDuckApi {
   notifyDragEnd: (pos?: { x: number; y: number }) => void;
   showContextMenu: () => void;
   scanDirectory: (path: string) => Promise<void>;
+  openCleanupWindow: () => Promise<void>;
+  getCleanupData: () => Promise<any>;
+  revealInFinder: (filePath: string) => Promise<boolean>;
+  moveToTrash: (filePath: string) => Promise<{ success: boolean; error?: string; size?: number; reclaimedBytes?: number }>;
+  moveToTrashBatch: (filePaths: string[]) => Promise<{ successCount: number; failureCount: number; reclaimedBytes?: number }>;
+  onCleanupDataUpdated: (callback: (data: any) => void) => () => void;
+  notifyPetSpeech: (text: string, duration?: number) => void;
 }
 
 const api: GrumpyDuckApi = {
@@ -68,6 +77,17 @@ const api: GrumpyDuckApi = {
   notifyDragEnd: (pos) => ipcRenderer.send('pet:drag-end', pos),
   showContextMenu: () => ipcRenderer.send('pet:show-context-menu'),
   scanDirectory: (path: string) => ipcRenderer.invoke('pet:scan-directory', path),
+  openCleanupWindow: () => ipcRenderer.invoke('pet:open-cleanup-window'),
+  getCleanupData: () => ipcRenderer.invoke('pet:get-cleanup-data'),
+  revealInFinder: (filePath: string) => ipcRenderer.invoke('pet:reveal-in-finder', filePath),
+  moveToTrash: (filePath: string) => ipcRenderer.invoke('pet:trash-item', filePath),
+  moveToTrashBatch: (filePaths: string[]) => ipcRenderer.invoke('pet:trash-batch', filePaths),
+  onCleanupDataUpdated: (callback) => {
+    const handler = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('cleanup:data-updated', handler);
+    return () => ipcRenderer.removeListener('cleanup:data-updated', handler);
+  },
+  notifyPetSpeech: (text: string, duration?: number) => ipcRenderer.send('pet:custom-speech', { text, duration }),
 };
 
 contextBridge.exposeInMainWorld('grumpyDuckApi', api);

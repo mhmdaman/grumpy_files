@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Speech listener
   if (window.grumpyDuckApi?.onShowSpeech) {
     window.grumpyDuckApi.onShowSpeech((data) => {
-      speech.say(data.text, data.duration || 3500);
+      speech.say(data, data?.duration || 3500);
     });
   }
 

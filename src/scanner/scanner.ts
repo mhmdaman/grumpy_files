@@ -200,6 +200,17 @@ async function analyzeBundle(
 // Recursive walk (depth-first, non-recursive implementation to avoid stack overflow)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Set of directory names to skip during recursive scan to prevent freezing on huge cache/build trees
+const SKIP_DIR_NAMES = new Set([
+  '.git',
+  'node_modules',
+  '.npm',
+  '.cache',
+  '__pycache__',
+  '.Trash',
+  'Library/Caches',
+]);
+
 async function walkDirectory(
   dir: string,
   config: ScanConfig,
@@ -244,9 +255,16 @@ async function walkDirectory(
   }
 
   const stack: string[] = [dir];
+  let processedCount = 0;
 
   while (stack.length > 0) {
     const currentDir = stack.pop()!;
+
+    // Yield periodically to keep Electron main event loop responsive & fluid (60fps)
+    processedCount++;
+    if (processedCount % 40 === 0) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
 
     let entries: fs.Dirent[];
     try {
@@ -290,6 +308,11 @@ async function walkDirectory(
 
         if (lstatResult.isDirectory()) {
           if (!config.includeHidden && entry.name.startsWith('.')) continue;
+
+          // Skip massive system/build/cache directories when scanning higher-level folders
+          if (SKIP_DIR_NAMES.has(entry.name) && currentDir !== dir) {
+            continue;
+          }
 
           // Check if this directory is a package/bundle (e.g. .app, .framework, .bundle)
           if (isBundleDirectory(entry.name, config.bundleExtensions)) {

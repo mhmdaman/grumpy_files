@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GrumpyDuck — Cleanup Candidates</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="cleanup.css">
+</head>
+<body>
+  <div class="window-container">
+    <!-- Window Header & Navigation -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo-area">
+          <div class="duck-avatar">🐥</div>
+          <div>
+            <h1 class="app-title">Cleanup Candidates</h1>
+            <p class="scanned-path" id="scanned-path-display">No scan performed yet</p>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <button id="refresh-btn" class="btn btn-secondary" title="Refresh Candidates">
+          🔄 Refresh
+        </button>
+        <button id="reveal-folder-btn" class="btn btn-secondary" title="Reveal scanned folder in Finder">
+          📂 Open in Finder
+        </button>
+      </div>
+    </header>
+
+    <!-- Storage & Stats Overview Banner -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-label">Total Candidates</span>
+        <span class="stat-value" id="stat-total-candidates">0</span>
+      </div>
+      <div class="stat-card stat-highlight">
+        <span class="stat-label">Duplicate Storage Recovery</span>
+        <span class="stat-value text-accent" id="stat-duplicate-wasted">0 B</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Potential Cleanup</span>
+        <span class="stat-value text-danger" id="stat-potential-cleanup">0</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">To Review</span>
+        <span class="stat-value text-warning" id="stat-review-count">0</span>
+      </div>
+      <div class="stat-card stat-success">
+        <span class="stat-label">Moved to Trash (Reclaimed)</span>
+        <span class="stat-value text-success" id="stat-reclaimed-space">0 B</span>
+      </div>
+    </section>
+
+    <!-- Filter Toolbar -->
+    <section class="toolbar">
+      <div class="toolbar-top">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search-input" placeholder="Filter by file name or path…" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="toolbar-bottom">
+        <div class="filter-group category-tabs" id="category-tabs">
+          <button class="tab-btn active" data-category="ALL">All (<span id="count-all">0</span>)</button>
+          <button class="tab-btn" data-category="DUPLICATE">📋 Duplicates (<span id="count-dup">0</span>)</button>
+          <button class="tab-btn" data-category="INSTALLER">💿 Installers (<span id="count-inst">0</span>)</button>
+          <button class="tab-btn" data-category="LARGE_FILE">📦 Large Files (<span id="count-large">0</span>)</button>
+          <button class="tab-btn" data-category="OLD_FILE">🕰️ Old Files (<span id="count-old">0</span>)</button>
+          <button class="tab-btn" data-category="EMPTY_FOLDER">📁 Empty Folders (<span id="count-empty">0</span>)</button>
+        </div>
+
+        <div class="filter-group recommendation-filter">
+          <span class="filter-label">Action:</span>
+          <select id="recommendation-select" class="custom-select">
+            <option value="ALL">All Actions</option>
+            <option value="POTENTIAL_CLEANUP">🗑 Potential Cleanup</option>
+            <option value="REVIEW">⚠️ Review</option>
+            <option value="KEEP">🛡 Keep</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- List Controls & Master Select-All Header -->
+    <div class="list-header-bar" id="list-header-bar">
+      <div class="list-header-left">
+        <label class="master-checkbox-label">
+          <input type="checkbox" id="master-select-all-cb" class="item-checkbox">
+          <span class="master-label-text" id="master-select-label">Select All Cleanup Candidates</span>
+        </label>
+        <span class="shortcut-hint">Press ⌘A / Ctrl+A to select all</span>
+      </div>
+      <div class="list-header-right selection-actions">
+        <button id="select-all-btn" class="btn btn-tiny btn-select-all" title="Select all cleanup candidates">
+          ✓ Select All
+        </button>
+        <button id="select-dup-btn" class="btn btn-tiny" title="Select all duplicate extra copies">
+          Select Duplicates
+        </button>
+        <button id="deselect-all-btn" class="btn btn-tiny" title="Deselect all files">
+          Deselect All
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="content-scroll" id="candidates-container">
+      <div class="empty-state" id="empty-state">
+        <span class="empty-icon">🦆</span>
+        <h2>No Cleanup Candidates</h2>
+        <p>Run a scan from the GrumpyDuck desktop pet context menu to analyze files.</p>
+      </div>
+    </main>
+
+    <!-- Floating / Sticky Batch Action Bar (Appears when >=1 file selected) -->
+    <div id="batch-action-bar" class="batch-bar hidden">
+      <div class="batch-bar-left">
+        <span class="batch-badge">✓ Selected</span>
+        <span class="batch-count" id="batch-selected-count">0 files</span>
+        <span class="batch-size" id="batch-selected-size">(0 B)</span>
+      </div>
+      <div class="batch-bar-right">
+        <button id="batch-cancel-btn" class="btn btn-secondary btn-small">Deselect All</button>
+        <button id="batch-trash-btn" class="btn btn-danger btn-small">
+          🗑 Move Selected to Trash
+        </button>
+      </div>
+    </div>
+
+    <!-- Single File Safe Trash Confirmation Modal -->
+    <div id="confirm-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <span class="modal-icon">🗑️</span>
+          <h3 class="modal-title">Move File to macOS Trash?</h3>
+        </div>
+        <div class="modal-body">
+          <p class="modal-text">Are you sure you want to move this file to the Trash?</p>
+          <div class="modal-file-info">
+            <div class="info-row">
+              <span class="info-label">Name:</span>
+              <span class="info-value" id="modal-file-name">filename.ext</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Path:</span>
+              <span class="info-value code" id="modal-file-path">/path/to/file</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Size:</span>
+              <span class="info-value" id="modal-file-size">0 KB</span>
+            </div>
+          </div>
+          <div class="modal-notice">
+            <span class="notice-icon">🛡️</span>
+            <span>This file will be safely moved to your macOS Trash. It will <strong>NOT</strong> be permanently deleted and can be restored using Finder Put Back.</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
+          <button id="modal-confirm-btn" class="btn btn-danger">Move to Trash</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Batch Safe Trash Confirmation Modal -->
+    <div id="batch-confirm-modal" class="modal-backdrop hidden">
+      <div class="modal-card modal-card-large">
+        <div class="modal-header">
+          <span class="modal-icon">🗑️</span>
+          <div>
+            <h3 class="modal-title" id="batch-modal-title">Move Selected Files to macOS Trash?</h3>
+            <p class="modal-subtitle" id="batch-modal-subtitle">Total: 0 files (0 B)</p>
+          </div>
+        </div>
+        <div class="modal-body">
+          <p class="modal-text">The following files will be safely moved to your macOS Trash:</p>
+          <div class="batch-items-preview" id="batch-modal-items-list">
+            <!-- Populated dynamically -->
+          </div>
+          <div class="modal-notice">
+            <span class="notice-icon">🛡️</span>
+            <span>Files will be moved to your macOS Trash. They will <strong>NOT</strong> be permanently deleted and can be restored anytime.</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="batch-modal-cancel-btn" class="btn btn-secondary">Cancel</button>
+          <button id="batch-modal-confirm-btn" class="btn btn-danger">Move All Selected to Trash</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden">
+      <span id="toast-text">Message</span>
+    </div>
+  </div>
+
+  <script src="cleanup.js"></script>
+</body>
+</html>

@@ -1,18 +1,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// GrumpyDuck — Desktop Pet IPC Handlers & File Intelligence Bridge
+// GrumpyDuck — Desktop Pet IPC Handlers, File Intelligence & Finder Bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ipcMain, BrowserWindow, dialog, Menu, MenuItemConstructorOptions } from 'electron';
+import { ipcMain, BrowserWindow, dialog, Menu, MenuItemConstructorOptions, shell } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import { MovementController } from './movement';
 import { SPRITE_CONFIGS } from './spriteConfig';
 import { savePetPosition } from './positionStore';
-import { findNearestPlatform, Platform } from './platformDetector';
+import { findNearestPlatform } from './platformDetector';
 import { scan } from '../../scanner/scanner';
 import { DEFAULT_CONFIG } from '../../scanner/rules';
 import { formatBytes } from '../../utils/formatBytes';
 import { ScanResult } from '../../types/scanner';
+import { extractCleanupCandidates } from '../../scanner/candidates';
+import { CleanupDataPayload, CleanupCandidate } from '../../types/candidates';
+import { isProtectedPath } from '../../safety/protectedPaths';
+import { isBundleDirectory } from '../../scanner/categories';
+import { moveToTrash } from '../../cleanup/trash';
+import { setCleanupSnapshot } from './cleanupDataStore';
 
 const IDLE_QUIPS = [
   "Quack. Still 0 bytes deleted today.",
@@ -27,9 +34,14 @@ const IDLE_QUIPS = [
 export function setupIpcHandlers(
   window: BrowserWindow,
   movement: MovementController,
-  initialDebug: boolean = false
+  initialDebug: boolean = false,
+  openCleanupWindow?: () => BrowserWindow,
+  getCleanupWindow?: () => BrowserWindow | null
 ): { triggerScan: (dir: string) => Promise<void> } {
   let isDebugMode = initialDebug;
+  let latestCleanupData: CleanupDataPayload | null = null;
+  let totalReclaimedBytes = 0;
+
 
   // Handlers for renderer initialization
   ipcMain.handle('pet:get-sprite-configs', () => {
@@ -53,6 +65,23 @@ export function setupIpcHandlers(
   // Renderer click interaction
   ipcMain.on('pet:on-click', () => {
     movement.pause(2500);
+
+    if (latestCleanupData && latestCleanupData.candidates.length > 0) {
+      const dupCount = latestCleanupData.summary.duplicateGroupCount;
+      const totalCandidates = latestCleanupData.candidates.length;
+      const text = dupCount > 0
+        ? `🐥 Found ${dupCount} duplicate groups! Want to review?`
+        : `🐥 I have ${totalCandidates} cleanup candidates ready.`;
+
+      window.webContents.send('pet:show-speech', {
+        text,
+        buttonText: 'View Cleanup Candidates',
+        action: 'open-candidates',
+        duration: 5000,
+      });
+      return;
+    }
+
     const quip = IDLE_QUIPS[Math.floor(Math.random() * IDLE_QUIPS.length)];
     window.webContents.send('pet:show-speech', { text: quip, duration: 3200 });
   });
@@ -74,7 +103,6 @@ export function setupIpcHandlers(
     const rawY = pos && typeof pos.y === 'number' ? Math.round(pos.y) : window.getPosition()[1];
 
     try {
-      // Find nearest walkable platform (Dock, manual platform, or screen floor)
       const snap = findNearestPlatform(rawX, rawY, w, h, 60);
       window.setPosition(snap.snappedX, snap.snappedY);
       savePetPosition({ x: snap.snappedX, y: snap.snappedY });
@@ -109,6 +137,27 @@ export function setupIpcHandlers(
         label: '🐥 GrumpyDuck Desktop Pet',
         enabled: false,
       },
+      { type: 'separator' },
+      {
+        label: '📋 View Cleanup Candidates',
+        click: () => {
+          if (openCleanupWindow) {
+            openCleanupWindow();
+            window.webContents.send('pet:show-speech', {
+              text: '🐥 Here are my suspects.',
+              duration: 3500,
+            });
+          }
+        },
+      },
+      ...(latestCleanupData ? [
+        {
+          label: `Reveal Scanned Folder (${path.basename(latestCleanupData.scannedPath)})`,
+          click: () => {
+            shell.openPath(latestCleanupData!.scannedPath);
+          },
+        } as MenuItemConstructorOptions,
+      ] : []),
       { type: 'separator' },
       {
         label: 'Scan ~/Downloads',
@@ -174,47 +223,339 @@ export function setupIpcHandlers(
     menu.popup({ window });
   });
 
-  // Scanner execution function with full intelligence integration
+  // Custom speech relay
+  ipcMain.on('pet:custom-speech', (_event, data: { text: string; duration?: number }) => {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('pet:show-speech', data);
+    }
+  });
+
+  // Open Cleanup Candidates window handler
+  ipcMain.handle('pet:open-cleanup-window', () => {
+    if (openCleanupWindow) {
+      openCleanupWindow();
+      window.webContents.send('pet:show-speech', {
+        text: '🐥 Here are my suspects.',
+        duration: 3500,
+      });
+    }
+  });
+
+  // Return cached cleanup candidates data
+  ipcMain.handle('pet:get-cleanup-data', () => {
+    return {
+      cleanupData: latestCleanupData,
+      totalReclaimedBytes,
+    };
+  });
+
+  // Reveal file in macOS Finder
+  ipcMain.handle('pet:reveal-in-finder', async (_event, filePath: string) => {
+    if (!filePath) return false;
+    try {
+      shell.showItemInFolder(filePath);
+      window.webContents.send('pet:show-speech', {
+        text: '🐥 There. Go inspect it.',
+        duration: 3200,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // Safe Deletion: Move item to Trash
+  ipcMain.handle('pet:trash-item', async (_event, filePath: string) => {
+    if (!filePath) {
+      return { success: false, error: 'No path specified.' };
+    }
+
+    const resolved = path.resolve(filePath);
+
+    // Safety checks
+    if (isProtectedPath(resolved)) {
+      return { success: false, error: `Safety violation: Protected system path (${resolved})` };
+    }
+
+    if (isBundleDirectory(path.basename(resolved))) {
+      return { success: false, error: 'Application bundles (.app) cannot be deleted.' };
+    }
+
+    if (!fs.existsSync(resolved)) {
+      return { success: false, error: 'File no longer exists on disk.' };
+    }
+
+    let fileSize = 0;
+    try {
+      const stats = fs.statSync(resolved);
+      fileSize = stats.size;
+    } catch {}
+
+    try {
+      // Safely move to macOS Trash using native Trash mechanism
+      await moveToTrash(resolved);
+
+      totalReclaimedBytes += fileSize;
+
+      // Update in-memory latestCleanupData
+      if (latestCleanupData) {
+        // Remove trashed candidate
+        latestCleanupData.candidates = latestCleanupData.candidates.filter(
+          (c) => path.resolve(c.path) !== resolved
+        );
+
+        // Update duplicate groups if affected
+        for (const group of latestCleanupData.duplicateGroups) {
+          const originalDupLen = group.duplicates.length;
+          group.duplicates = group.duplicates.filter(
+            (d) => path.resolve(d.path) !== resolved
+          );
+          if (group.duplicates.length < originalDupLen) {
+            group.wastedBytes = group.size * group.duplicates.length;
+          }
+        }
+
+        // Recalculate summary
+        let potentialCleanupCount = 0;
+        let reviewCount = 0;
+        let keepCount = 0;
+        let totalWasted = 0;
+
+        for (const c of latestCleanupData.candidates) {
+          if (c.recommendation === 'POTENTIAL_CLEANUP') potentialCleanupCount++;
+          else if (c.recommendation === 'REVIEW') reviewCount++;
+          else if (c.recommendation === 'KEEP') keepCount++;
+        }
+
+        for (const g of latestCleanupData.duplicateGroups) {
+          totalWasted += g.wastedBytes;
+        }
+
+        latestCleanupData.summary.totalCandidates = latestCleanupData.candidates.length;
+        latestCleanupData.summary.potentialCleanupCount = potentialCleanupCount;
+        latestCleanupData.summary.reviewCount = reviewCount;
+        latestCleanupData.summary.keepCount = keepCount;
+        latestCleanupData.summary.totalDuplicateWastedBytes = totalWasted;
+
+        // Keep the shared store in sync for future window opens
+        setCleanupSnapshot({ cleanupData: latestCleanupData, totalReclaimedBytes });
+
+        // Broadcast updated data to cleanupWindow
+        const cw = getCleanupWindow ? getCleanupWindow() : null;
+        if (cw && !cw.isDestroyed()) {
+          cw.webContents.send('cleanup:data-updated', {
+            cleanupData: latestCleanupData,
+            totalReclaimedBytes,
+          });
+        }
+      }
+
+      // Desktop Pet reaction
+      const quips = [
+        '🐥 One less thing cluttering the nest.',
+        '🐥 Gone to the Trash. Probably deserved it.',
+      ];
+      const selectedQuip = quips[Math.floor(Math.random() * quips.length)];
+      window.webContents.send('pet:show-speech', {
+        text: selectedQuip,
+        duration: 4000,
+      });
+
+      return {
+        success: true,
+        size: fileSize,
+        reclaimedBytes: totalReclaimedBytes,
+      };
+    } catch (err: unknown) {
+      const error = err as Error;
+      return { success: false, error: error.message || 'Failed to move to Trash' };
+    }
+  });
+
+  // Safe Batch Deletion: Move multiple items to Trash
+  ipcMain.handle('pet:trash-batch', async (_event, filePaths: string[]) => {
+    if (!Array.isArray(filePaths) || filePaths.length === 0) {
+      return { successCount: 0, failureCount: 0, reclaimedBytes: totalReclaimedBytes };
+    }
+
+    let successCount = 0;
+    let failureCount = 0;
+    const trashedSet = new Set<string>();
+
+    for (const filePath of filePaths) {
+      const resolved = path.resolve(filePath);
+
+      // Safety checks
+      if (isProtectedPath(resolved) || isBundleDirectory(path.basename(resolved)) || !fs.existsSync(resolved)) {
+        failureCount++;
+        continue;
+      }
+
+      let fileSize = 0;
+      try {
+        const stats = fs.statSync(resolved);
+        fileSize = stats.size;
+      } catch {}
+
+      try {
+        await moveToTrash(resolved);
+        totalReclaimedBytes += fileSize;
+        successCount++;
+        trashedSet.add(resolved);
+      } catch {
+        failureCount++;
+      }
+    }
+
+    // Update in-memory latestCleanupData
+    if (latestCleanupData && successCount > 0) {
+      latestCleanupData.candidates = latestCleanupData.candidates.filter(
+        (c) => !trashedSet.has(path.resolve(c.path))
+      );
+
+      for (const group of latestCleanupData.duplicateGroups) {
+        const originalDupLen = group.duplicates.length;
+        group.duplicates = group.duplicates.filter(
+          (d) => !trashedSet.has(path.resolve(d.path))
+        );
+        if (group.duplicates.length < originalDupLen) {
+          group.wastedBytes = group.size * group.duplicates.length;
+        }
+      }
+
+      let potentialCleanupCount = 0;
+      let reviewCount = 0;
+      let keepCount = 0;
+      let totalWasted = 0;
+
+      for (const c of latestCleanupData.candidates) {
+        if (c.recommendation === 'POTENTIAL_CLEANUP') potentialCleanupCount++;
+        else if (c.recommendation === 'REVIEW') reviewCount++;
+        else if (c.recommendation === 'KEEP') keepCount++;
+      }
+
+      for (const g of latestCleanupData.duplicateGroups) {
+        totalWasted += g.wastedBytes;
+      }
+
+      latestCleanupData.summary.totalCandidates = latestCleanupData.candidates.length;
+      latestCleanupData.summary.potentialCleanupCount = potentialCleanupCount;
+      latestCleanupData.summary.reviewCount = reviewCount;
+      latestCleanupData.summary.keepCount = keepCount;
+      latestCleanupData.summary.totalDuplicateWastedBytes = totalWasted;
+
+      // Keep the shared store in sync for future window opens
+      setCleanupSnapshot({ cleanupData: latestCleanupData, totalReclaimedBytes });
+
+      // Broadcast update to cleanupWindow
+      const cw = getCleanupWindow ? getCleanupWindow() : null;
+      if (cw && !cw.isDestroyed()) {
+        cw.webContents.send('cleanup:data-updated', {
+          cleanupData: latestCleanupData,
+          totalReclaimedBytes,
+        });
+      }
+    }
+
+    // Desktop pet speech reaction
+    if (successCount > 0) {
+      const quips = [
+        `🐥 Cleaned out ${successCount} items! Space well reclaimed.`,
+        `🐥 Dumped ${successCount} files into Trash. Nest feels lighter.`,
+      ];
+      const selectedQuip = quips[Math.floor(Math.random() * quips.length)];
+      window.webContents.send('pet:show-speech', {
+        text: selectedQuip,
+        duration: 4500,
+      });
+    }
+
+    return {
+      successCount,
+      failureCount,
+      reclaimedBytes: totalReclaimedBytes,
+    };
+  });
+
+  // Scanner execution function with full intelligence & Finder integration
   async function triggerScan(directory: string): Promise<void> {
     const resolvedDir = directory.startsWith('~')
       ? path.join(os.homedir(), directory.slice(1))
       : path.resolve(directory);
 
+    // Validate existence
+    if (!fs.existsSync(resolvedDir)) {
+      window.webContents.send('pet:show-speech', {
+        text: `🐥 Folder not found: ${path.basename(resolvedDir)}`,
+        duration: 4000,
+      });
+      return;
+    }
+
     movement.pause();
     movement.setState('SCANNING');
 
     window.webContents.send('pet:state-changed', 'SCANNING');
+
+    // 1. Requirement: When scan starts, show "I'm checking this place."
     window.webContents.send('pet:show-speech', {
-      text: `🐥 Investigating ${path.basename(resolvedDir)}…`,
-      duration: 5000,
+      text: "I'm checking this place.",
+      duration: 4000,
     });
+
+    // 2. Requirement: Automatically open that exact folder in macOS Finder once when scan starts
+    try {
+      await shell.openPath(resolvedDir);
+    } catch (err) {
+      console.error(`Failed to open directory in Finder: ${(err as Error).message}`);
+    }
 
     try {
       const result: ScanResult = await scan(resolvedDir, DEFAULT_CONFIG);
 
-      const dupCount = result.summary.duplicateGroupCount;
-      const dupWasted = result.summary.duplicateWastedBytes;
+      // Extract cleanup candidates and duplicate groups
+      latestCleanupData = extractCleanupCandidates(result);
+      // Persist to shared store so a freshly opened cleanup window can retrieve it.
+      setCleanupSnapshot({ cleanupData: latestCleanupData, totalReclaimedBytes });
+
+      const dupCount = latestCleanupData.summary.duplicateGroupCount;
+      const dupWasted = latestCleanupData.summary.totalDuplicateWastedBytes;
+      const totalCandidates = latestCleanupData.candidates.length;
       const totalFiles = result.summary.totalFiles;
-      const largeCount = result.summary.largeFileCount;
 
       let resultMessage = `🐥 Scanned ${totalFiles} files.`;
 
+      // Pet dialogue requirement:
+      // When duplicates are found: "I found copies of the same thing."
       if (dupCount > 0) {
-        resultMessage = `🐥 Found ${dupCount} duplicate group${dupCount === 1 ? '' : 's'} (${formatBytes(dupWasted)} wasted).`;
-      } else if (largeCount > 0) {
-        resultMessage = `🐥 Scanned ${totalFiles} files. Found ${largeCount} large files.`;
+        resultMessage = `🐥 I found copies of the same thing. (${formatBytes(dupWasted)} wasted)`;
+      } else if (totalCandidates > 0) {
+        resultMessage = `🐥 Scanned ${totalFiles} files. Found ${totalCandidates} candidates.`;
       } else {
         resultMessage = `🐥 Scanned ${totalFiles} files. Clean!`;
       }
 
       movement.setState('IDLE');
       window.webContents.send('pet:state-changed', 'IDLE');
+
+      // Show notification / speech bubble with actionable button
       window.webContents.send('pet:show-speech', {
         text: resultMessage,
-        duration: 6000,
+        buttonText: totalCandidates > 0 ? 'View Cleanup Candidates' : undefined,
+        action: totalCandidates > 0 ? 'open-candidates' : undefined,
+        duration: 8000,
       });
 
       window.webContents.send('pet:bounce');
+
+      // Notify open cleanupWindow if exists
+      const cw = getCleanupWindow ? getCleanupWindow() : null;
+      if (cw && !cw.isDestroyed()) {
+        cw.webContents.send('cleanup:data-updated', {
+          cleanupData: latestCleanupData,
+          totalReclaimedBytes,
+        });
+      }
 
       setTimeout(() => {
         movement.resume();
