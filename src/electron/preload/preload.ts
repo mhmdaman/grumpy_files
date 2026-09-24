@@ -14,6 +14,9 @@ export interface SpeechData {
 export interface DebugData {
   isDebug: boolean;
   state: string;
+  previousState?: string;
+  priority?: number;
+  currentGif?: string;
   platform: any;
   position: { x: number; y: number };
 }
@@ -22,6 +25,7 @@ export interface GrumpyDuckApi {
   getSpriteConfigs: () => Promise<any>;
   getInitialState: () => Promise<string>;
   getDebugState: () => Promise<DebugData>;
+  setEmotion: (emotion: string, options?: { durationMs?: number; force?: boolean }) => Promise<boolean>;
   onStateChanged: (callback: (state: string) => void) => () => void;
   onPlatformChanged: (callback: (platform: any) => void) => () => void;
   onDebugChanged: (callback: (debug: DebugData) => void) => () => void;
@@ -46,6 +50,7 @@ const api: GrumpyDuckApi = {
   getSpriteConfigs: () => ipcRenderer.invoke('pet:get-sprite-configs'),
   getInitialState: () => ipcRenderer.invoke('pet:get-state'),
   getDebugState: () => ipcRenderer.invoke('pet:get-debug-state'),
+  setEmotion: (emotion, options) => ipcRenderer.invoke('pet:set-emotion', emotion, options),
   onStateChanged: (callback) => {
     const handler = (_event: any, state: string) => callback(state);
     ipcRenderer.on('pet:state-changed', handler);

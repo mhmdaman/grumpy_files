@@ -22,10 +22,10 @@ let cleanupWindow: BrowserWindow | null = null;
 let movementController: MovementController | null = null;
 
 
-const WINDOW_WIDTH = 130;
+const WINDOW_WIDTH = 160;
 const WINDOW_HEIGHT = 120;
 
-const isDebugInitially = process.argv.includes('--debug') || process.env.GRUMPYDUCK_DEBUG === '1';
+const isDebugInitially = process.argv.includes('--debug') || process.env.GRUMPYDUCK_DEBUG === '1' || process.argv.includes('--cycle-test');
 
 function resolveRendererHtml(filename: string): string {
   let p = path.resolve(__dirname, `../renderer/${filename}`);
@@ -180,6 +180,30 @@ function createPetWindow(): void {
       petWindow.show();
       // Start autonomous movement cycle
       movementController?.start();
+
+      if (process.argv.includes('--cycle-test')) {
+        const cycle: { state: any; label: string; durationMs: number }[] = [
+          { state: 'IDLE', label: '1/7: IDLE (idle.gif)', durationMs: 3000 },
+          { state: 'WALK_RIGHT', label: '2/7: WALK_RIGHT (walk-right.gif)', durationMs: 3000 },
+          { state: 'WALK_LEFT', label: '3/7: WALK_LEFT (walk-left.gif)', durationMs: 3000 },
+          { state: 'SCANNING', label: '4/7: SCANNING (scan.gif)', durationMs: 3500 },
+          { state: 'HAPPY', label: '5/7: HAPPY (happy.gif)', durationMs: 3500 },
+          { state: 'THINKING', label: '6/7: THINKING (thinking.gif)', durationMs: 3500 },
+          { state: 'SURPRISED', label: '7/7: SURPRISED (surprised.gif)', durationMs: 3500 },
+          { state: 'IDLE', label: '✓ Cycle Complete: IDLE', durationMs: 3000 },
+        ];
+
+        let delay = 1000;
+        for (const step of cycle) {
+          setTimeout(() => {
+            if (petWindow && !petWindow.isDestroyed() && movementController) {
+              movementController.setEmotion(step.state, { durationMs: step.durationMs, force: true });
+              petWindow.webContents.send('pet:show-speech', { text: `[Auto-Cycle] ${step.label}`, duration: step.durationMs - 300 });
+            }
+          }, delay);
+          delay += step.durationMs;
+        }
+      }
     }
   });
 

@@ -8,16 +8,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   const bubbleContainer = document.getElementById('speech-bubble-container');
   const debugOverlay = document.getElementById('debug-overlay');
   const debugState = document.getElementById('debug-state');
+  const debugGif = document.getElementById('debug-gif');
+  const debugPrev = document.getElementById('debug-prev');
+  const debugPrio = document.getElementById('debug-prio');
   const debugPlatform = document.getElementById('debug-platform');
 
   const speech = new window.SpeechBubble(bubbleContainer);
 
-  // Fallback configs
+  // Fallback configs including newly discovered animations
   const fallbackConfigs = {
-    IDLE: { relativePath: 'assets/grumpyduck/idle.gif', loop: true, type: 'gif' },
-    WALK_LEFT: { relativePath: 'assets/grumpyduck/walk-left.gif', loop: true, type: 'gif' },
-    WALK_RIGHT: { relativePath: 'assets/grumpyduck/walk-right.gif', loop: true, type: 'gif' },
-    SCANNING: { relativePath: 'assets/grumpyduck/scan.gif', loop: true, type: 'gif' },
+    IDLE: { name: 'idle', relativePath: 'assets/grumpyduck/idle.gif', loop: true, type: 'gif' },
+    WALK_LEFT: { name: 'walk-left', relativePath: 'assets/grumpyduck/walk-left.gif', loop: true, type: 'gif' },
+    WALK_RIGHT: { name: 'walk-right', relativePath: 'assets/grumpyduck/walk-right.gif', loop: true, type: 'gif' },
+    SCANNING: { name: 'scan', relativePath: 'assets/grumpyduck/scan.gif', loop: true, type: 'gif' },
+    HAPPY: { name: 'happy', relativePath: 'assets/grumpyduck/happy.gif', loop: true, type: 'gif' },
+    SURPRISED: { name: 'surprised', relativePath: 'assets/grumpyduck/surprised.gif', loop: true, type: 'gif' },
+    THINKING: { name: 'thinking', relativePath: 'assets/grumpyduck/thinking.gif', loop: true, type: 'gif' },
   };
 
   let configs = fallbackConfigs;
@@ -33,23 +39,40 @@ document.addEventListener('DOMContentLoaded', async () => {
   const animator = new window.GifAnimator(duckImg, configs, 'IDLE');
   animator.setState('IDLE');
 
+  const updateDebugInfo = (debug) => {
+    if (!debug) return;
+    if (debug.isDebug) {
+      debugOverlay.classList.remove('hidden');
+      if (debugState) debugState.textContent = `State: ${debug.state || 'IDLE'}`;
+      if (debugGif) debugGif.textContent = `GIF: ${debug.currentGif || (configs[debug.state]?.name || 'idle')}.gif`;
+      if (debugPrev) debugPrev.textContent = `Prev: ${debug.previousState || '-'}`;
+      if (debugPrio !== null && debugPrio !== undefined && debug.priority !== undefined) {
+        debugPrio.textContent = `Priority: ${debug.priority}`;
+      }
+      if (debugPlatform && debug.platform) debugPlatform.textContent = `Plat: ${debug.platform.name}`;
+    } else {
+      debugOverlay.classList.add('hidden');
+    }
+  };
+
   // Initial debug state check
   if (window.grumpyDuckApi?.getDebugState) {
     try {
       const debug = await window.grumpyDuckApi.getDebugState();
-      if (debug && debug.isDebug) {
-        debugOverlay.classList.remove('hidden');
-        if (debugState) debugState.textContent = `State: ${debug.state || 'IDLE'}`;
-        if (debugPlatform && debug.platform) debugPlatform.textContent = `Plat: ${debug.platform.name}`;
-      }
+      updateDebugInfo(debug);
     } catch {}
   }
 
   // State change listener
   if (window.grumpyDuckApi?.onStateChanged) {
-    window.grumpyDuckApi.onStateChanged((state) => {
+    window.grumpyDuckApi.onStateChanged(async (state) => {
       animator.setState(state);
-      if (debugState) debugState.textContent = `State: ${state}`;
+      if (window.grumpyDuckApi?.getDebugState) {
+        try {
+          const debug = await window.grumpyDuckApi.getDebugState();
+          updateDebugInfo(debug);
+        } catch {}
+      }
     });
   }
 
@@ -65,13 +88,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Debug overlay toggle listener
   if (window.grumpyDuckApi?.onDebugChanged) {
     window.grumpyDuckApi.onDebugChanged((debug) => {
-      if (debug.isDebug) {
-        debugOverlay.classList.remove('hidden');
-        if (debugState) debugState.textContent = `State: ${debug.state || 'IDLE'}`;
-        if (debugPlatform && debug.platform) debugPlatform.textContent = `Plat: ${debug.platform.name}`;
-      } else {
-        debugOverlay.classList.add('hidden');
-      }
+      updateDebugInfo(debug);
     });
   }
 

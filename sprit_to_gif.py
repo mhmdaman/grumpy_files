@@ -22,13 +22,27 @@ for i in range(frames_count):
 
     frames.append(frame)
 
-# Save while preserving transparency
-frames[0].save(
+# Convert RGBA frames to P mode with palette and alpha transparency preserved
+p_frames = []
+for f in frames:
+    alpha = f.split()[3]
+    rgb = f.convert("RGB")
+    p_frame = rgb.convert("P", palette=Image.ADAPTIVE, colors=255)
+    mask = Image.eval(alpha, lambda a: 255 if a < 128 else 0)
+    p_frame.paste(255, mask)
+    p_frame.info["transparency"] = 255
+    p_frame.info["duration"] = 120
+    p_frame.info["disposal"] = 2
+    p_frames.append(p_frame)
+
+# Save with full multi-frame transparency
+p_frames[0].save(
     output_file,
     save_all=True,
-    append_images=frames[1:],
+    append_images=p_frames[1:],
     duration=120,
     loop=0,
+    transparency=255,
     disposal=2
 )
 

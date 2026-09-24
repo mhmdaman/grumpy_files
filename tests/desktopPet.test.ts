@@ -2,12 +2,13 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { SPRITE_CONFIGS } from '../src/electron/main/spriteConfig';
+import { SPRITE_CONFIGS, resolveAnimationConfig } from '../src/electron/main/spriteConfig';
+import { STATE_PRIORITIES } from '../src/pet/PetState';
 import { loadManualPlatforms, Platform } from '../src/electron/main/platformDetector';
 
 describe('Phase 5: Desktop Pet & GIF Animation Configuration', () => {
-  it('defines valid GIF animation configs for all pet states', () => {
-    const states = ['IDLE', 'WALK_LEFT', 'WALK_RIGHT', 'SCANNING'] as const;
+  it('defines valid GIF animation configs for all pet states and discovered emotions', () => {
+    const states = ['IDLE', 'WALK_LEFT', 'WALK_RIGHT', 'SCANNING', 'HAPPY', 'SURPRISED', 'THINKING'] as const;
 
     for (const state of states) {
       const config = SPRITE_CONFIGS[state];
@@ -19,11 +20,32 @@ describe('Phase 5: Desktop Pet & GIF Animation Configuration', () => {
     }
   });
 
-  it('points to valid transparent GIF asset paths', () => {
+  it('points to valid transparent GIF asset paths for all discovered emotions', () => {
     expect(SPRITE_CONFIGS.IDLE.relativePath).toBe('assets/grumpyduck/idle.gif');
     expect(SPRITE_CONFIGS.WALK_LEFT.relativePath).toBe('assets/grumpyduck/walk-left.gif');
     expect(SPRITE_CONFIGS.WALK_RIGHT.relativePath).toBe('assets/grumpyduck/walk-right.gif');
     expect(SPRITE_CONFIGS.SCANNING.relativePath).toBe('assets/grumpyduck/scan.gif');
+    expect(SPRITE_CONFIGS.HAPPY.relativePath).toBe('assets/grumpyduck/happy.gif');
+    expect(SPRITE_CONFIGS.SURPRISED.relativePath).toBe('assets/grumpyduck/surprised.gif');
+    expect(SPRITE_CONFIGS.THINKING.relativePath).toBe('assets/grumpyduck/thinking.gif');
+  });
+
+  it('safely falls back to idle config when requesting unavailable animation states', () => {
+    const fallback = resolveAnimationConfig('SLEEPING');
+    expect(fallback).toBeDefined();
+    expect(fallback.relativePath).toBe('assets/grumpyduck/idle.gif');
+
+    const unknownFallback = resolveAnimationConfig('UNKNOWN_EMOTION_XYZ');
+    expect(unknownFallback.relativePath).toBe('assets/grumpyduck/idle.gif');
+  });
+
+  it('maintains strict state priority hierarchy', () => {
+    expect(STATE_PRIORITIES.WARNING).toBeGreaterThan(STATE_PRIORITIES.SURPRISED);
+    expect(STATE_PRIORITIES.SURPRISED).toBeGreaterThan(STATE_PRIORITIES.SCANNING);
+    expect(STATE_PRIORITIES.SCANNING).toBeGreaterThan(STATE_PRIORITIES.HAPPY);
+    expect(STATE_PRIORITIES.HAPPY).toBe(STATE_PRIORITIES.THINKING);
+    expect(STATE_PRIORITIES.HAPPY).toBeGreaterThan(STATE_PRIORITIES.WALK_LEFT);
+    expect(STATE_PRIORITIES.WALK_LEFT).toBeGreaterThan(STATE_PRIORITIES.IDLE);
   });
 
   it('persists and reads pet position correctly', () => {
@@ -69,4 +91,37 @@ describe('Phase 5: Desktop Pet & GIF Animation Configuration', () => {
       fs.unlinkSync(platformsFile);
     } catch {}
   });
+
+
+  it('guarantees all GIFs exist on disk with non-zero size and transparent GIF header', () => {
+    const gifNames = ['idle.gif', 'walk-left.gif', 'walk-right.gif', 'scan.gif', 'happy.gif', 'surprised.gif', 'thinking.gif'];
+    for (const name of gifNames) {
+      const p = path.resolve(process.cwd(), 'assets/grumpyduck', name);
+      expect(fs.existsSync(p)).toBe(true);
+      const stat = fs.statSync(p);
+      expect(stat.size).toBeGreaterThan(1000);
+      const buf = fs.readFileSync(p);
+      // Check GIF89a / GIF87a header
+      const header = buf.subarray(0, 6).toString('ascii');
+      expect(header === 'GIF89a' || header === 'GIF87a').toBe(true);
+    }
+  });
+
+  it('correctly categorizes passive, movement, and real-event activities', async () => {
+    const { PASSIVE_ACTIVITIES, MOVEMENT_ACTIVITIES, REAL_EVENT_ACTIVITIES, ACTIVITY_INTERVAL_MS } = await import('../src/electron/main/movement');
+    expect(ACTIVITY_INTERVAL_MS).toBe(5000);
+    expect(PASSIVE_ACTIVITIES).toContain('IDLE');
+    expect(PASSIVE_ACTIVITIES).toContain('HAPPY');
+    expect(PASSIVE_ACTIVITIES).toContain('THINKING');
+    expect(PASSIVE_ACTIVITIES).toContain('SURPRISED');
+    expect(PASSIVE_ACTIVITIES).not.toContain('SCANNING');
+
+    expect(MOVEMENT_ACTIVITIES).toContain('WALK_LEFT');
+    expect(MOVEMENT_ACTIVITIES).toContain('WALK_RIGHT');
+
+    expect(REAL_EVENT_ACTIVITIES).toContain('SCANNING');
+    expect(REAL_EVENT_ACTIVITIES).toContain('WARNING');
+  });
 });
+
+

@@ -52,11 +52,18 @@ export function setupIpcHandlers(
     return movement.getCurrentState();
   });
 
+  ipcMain.handle('pet:set-emotion', (_event, emotion: string, options?: { durationMs?: number; force?: boolean }) => {
+    return movement.setEmotion(emotion as any, options);
+  });
+
   ipcMain.handle('pet:get-debug-state', () => {
     const pos = window.getPosition();
     return {
       isDebug: isDebugMode,
       state: movement.getCurrentState(),
+      previousState: movement.getPreviousState(),
+      priority: movement.getStatePriority(),
+      currentGif: movement.getCurrentGif(),
       platform: movement.getPlatform(),
       position: { x: pos[0], y: pos[1] },
     };
@@ -64,7 +71,7 @@ export function setupIpcHandlers(
 
   // Renderer click interaction
   ipcMain.on('pet:on-click', () => {
-    movement.pause(2500);
+    movement.setEmotion('SURPRISED', { durationMs: 2200 });
 
     if (latestCleanupData && latestCleanupData.candidates.length > 0) {
       const dupCount = latestCleanupData.summary.duplicateGroupCount;
@@ -180,6 +187,48 @@ export function setupIpcHandlers(
         },
       },
       { type: 'separator' },
+      ...(isDebugMode ? [
+        {
+          label: '🎭 Debug: Test Animations',
+          submenu: [
+            {
+              label: '🔄 Run Full Cycle Test',
+              click: () => {
+                const cycle: { state: any; label: string; durationMs: number }[] = [
+                  { state: 'IDLE', label: 'IDLE (idle.gif)', durationMs: 3000 },
+                  { state: 'WALK_RIGHT', label: 'WALK_RIGHT (walk-right.gif)', durationMs: 3000 },
+                  { state: 'WALK_LEFT', label: 'WALK_LEFT (walk-left.gif)', durationMs: 3000 },
+                  { state: 'SCANNING', label: 'SCANNING (scan.gif)', durationMs: 3500 },
+                  { state: 'HAPPY', label: 'HAPPY (happy.gif)', durationMs: 3500 },
+                  { state: 'THINKING', label: 'THINKING (thinking.gif)', durationMs: 3500 },
+                  { state: 'SURPRISED', label: 'SURPRISED (surprised.gif)', durationMs: 3500 },
+                  { state: 'IDLE', label: 'IDLE', durationMs: 3000 },
+                ];
+
+                let delay = 0;
+                for (const step of cycle) {
+                  setTimeout(() => {
+                    if (window && !window.isDestroyed()) {
+                      movement.setEmotion(step.state, { durationMs: step.durationMs, force: true });
+                      window.webContents.send('pet:show-speech', { text: `[Debug] ${step.label}`, duration: step.durationMs - 300 });
+                    }
+                  }, delay);
+                  delay += step.durationMs;
+                }
+              },
+            },
+            { type: 'separator' },
+            { label: '🐥 Idle', click: () => movement.setEmotion('IDLE', { force: true }) },
+            { label: '🎉 Happy', click: () => movement.setEmotion('HAPPY', { durationMs: 4000, force: true }) },
+            { label: '🤔 Thinking', click: () => movement.setEmotion('THINKING', { durationMs: 4000, force: true }) },
+            { label: '😲 Surprised', click: () => movement.setEmotion('SURPRISED', { durationMs: 3000, force: true }) },
+            { label: '🔍 Scanning', click: () => movement.setEmotion('SCANNING', { durationMs: 4000, force: true }) },
+            { label: '⬅️ Walk Left', click: () => movement.setEmotion('WALK_LEFT', { durationMs: 3000, force: true }) },
+            { label: '➡️ Walk Right', click: () => movement.setEmotion('WALK_RIGHT', { durationMs: 3000, force: true }) },
+          ],
+        } as MenuItemConstructorOptions,
+        { type: 'separator' } as MenuItemConstructorOptions,
+      ] : []),
       {
         label: isDebugMode ? '✓ Debug Mode Enabled' : 'Enable Debug Overlay',
         click: () => {
@@ -188,6 +237,9 @@ export function setupIpcHandlers(
           window.webContents.send('pet:debug-changed', {
             isDebug: isDebugMode,
             state: movement.getCurrentState(),
+            previousState: movement.getPreviousState(),
+            priority: movement.getStatePriority(),
+            currentGif: movement.getCurrentGif(),
             platform: movement.getPlatform(),
             position: { x: pos[0], y: pos[1] },
           });
@@ -296,6 +348,9 @@ export function setupIpcHandlers(
       await moveToTrash(resolved);
 
       totalReclaimedBytes += fileSize;
+
+      // Celebrate successful trash with Happy emotion
+      movement.setEmotion('HAPPY', { durationMs: 3500 });
 
       // Update in-memory latestCleanupData
       if (latestCleanupData) {
@@ -407,6 +462,10 @@ export function setupIpcHandlers(
       }
     }
 
+    if (successCount > 0) {
+      movement.setEmotion('HAPPY', { durationMs: 4000 });
+    }
+
     // Update in-memory latestCleanupData
     if (latestCleanupData && successCount > 0) {
       latestCleanupData.candidates = latestCleanupData.candidates.filter(
@@ -492,10 +551,7 @@ export function setupIpcHandlers(
       return;
     }
 
-    movement.pause();
-    movement.setState('SCANNING');
-
-    window.webContents.send('pet:state-changed', 'SCANNING');
+    movement.setEmotion('SCANNING', { force: true });
 
     // 1. Requirement: When scan starts, show "I'm checking this place."
     window.webContents.send('pet:show-speech', {
@@ -525,18 +581,17 @@ export function setupIpcHandlers(
 
       let resultMessage = `🐥 Scanned ${totalFiles} files.`;
 
-      // Pet dialogue requirement:
-      // When duplicates are found: "I found copies of the same thing."
+      // Pet dialogue and emotion reaction requirement:
       if (dupCount > 0) {
         resultMessage = `🐥 I found copies of the same thing. (${formatBytes(dupWasted)} wasted)`;
+        movement.setEmotion('THINKING', { durationMs: 6500, force: true });
       } else if (totalCandidates > 0) {
         resultMessage = `🐥 Scanned ${totalFiles} files. Found ${totalCandidates} candidates.`;
+        movement.setEmotion('THINKING', { durationMs: 6500, force: true });
       } else {
         resultMessage = `🐥 Scanned ${totalFiles} files. Clean!`;
+        movement.setEmotion('HAPPY', { durationMs: 5500, force: true });
       }
-
-      movement.setState('IDLE');
-      window.webContents.send('pet:state-changed', 'IDLE');
 
       // Show notification / speech bubble with actionable button
       window.webContents.send('pet:show-speech', {
@@ -556,10 +611,6 @@ export function setupIpcHandlers(
           totalReclaimedBytes,
         });
       }
-
-      setTimeout(() => {
-        movement.resume();
-      }, 7000);
     } catch (err: unknown) {
       const error = err as Error;
       movement.setState('IDLE');
