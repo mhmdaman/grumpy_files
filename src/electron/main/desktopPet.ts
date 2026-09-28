@@ -178,18 +178,35 @@ function createPetWindow(): void {
       movementController?.setPlatform(snap.platform);
 
       petWindow.show();
-      // Start autonomous movement cycle
-      movementController?.start();
+
+      // ── Hatching birth sequence ─────────────────────────────────────────────
+      // Play hatching.gif once (5040 ms, matching canonical GIF timing).
+      // The BrowserWindow dimensions stay fixed at 110×88 throughout.
+      // hatching.gif shares the same canvas size as idle.gif — no resize occurs.
+      const HATCHING_DURATION_MS = 5040;
+
+      movementController?.pause();
+      petWindow.webContents.send('pet:state-changed', 'HATCHING');
+
+      setTimeout(() => {
+        if (petWindow && !petWindow.isDestroyed()) {
+          // Seamless cut to IDLE — same 110×88 canvas, same baseline, same duck size
+          petWindow.webContents.send('pet:state-changed', 'IDLE');
+          movementController?.start();
+        }
+      }, HATCHING_DURATION_MS);
+      // ───────────────────────────────────────────────────────────────────────
 
       if (process.argv.includes('--cycle-test')) {
         const cycle: { state: any; label: string; durationMs: number }[] = [
-          { state: 'IDLE', label: '1/7: IDLE (idle.gif)', durationMs: 3000 },
-          { state: 'WALK_RIGHT', label: '2/7: WALK_RIGHT (walk-right.gif)', durationMs: 3000 },
-          { state: 'WALK_LEFT', label: '3/7: WALK_LEFT (walk-left.gif)', durationMs: 3000 },
-          { state: 'SCANNING', label: '4/7: SCANNING (scan.gif)', durationMs: 3500 },
-          { state: 'HAPPY', label: '5/7: HAPPY (happy.gif)', durationMs: 3500 },
-          { state: 'THINKING', label: '6/7: THINKING (thinking.gif)', durationMs: 3500 },
-          { state: 'SURPRISED', label: '7/7: SURPRISED (surprised.gif)', durationMs: 3500 },
+          { state: 'HATCHING', label: '0/8: HATCHING (hatching.gif)', durationMs: 5040 },
+          { state: 'IDLE', label: '1/8: IDLE (idle.gif)', durationMs: 3000 },
+          { state: 'WALK_RIGHT', label: '2/8: WALK_RIGHT (walk-right.gif)', durationMs: 3000 },
+          { state: 'WALK_LEFT', label: '3/8: WALK_LEFT (walk-left.gif)', durationMs: 3000 },
+          { state: 'SCANNING', label: '4/8: SCANNING (scan.gif)', durationMs: 3500 },
+          { state: 'HAPPY', label: '5/8: HAPPY (happy.gif)', durationMs: 3500 },
+          { state: 'THINKING', label: '6/8: THINKING (thinking.gif)', durationMs: 3500 },
+          { state: 'SURPRISED', label: '7/8: SURPRISED (surprised.gif)', durationMs: 3500 },
           { state: 'IDLE', label: '✓ Cycle Complete: IDLE', durationMs: 3000 },
         ];
 

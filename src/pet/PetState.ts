@@ -3,6 +3,7 @@
  */
 export const PET_STATES = [
   'IDLE',
+  'HATCHING',
   'WALK_LEFT',
   'WALK_RIGHT',
   'WALKING_LEFT',
@@ -26,6 +27,7 @@ export type WalkingDirection = 'LEFT' | 'RIGHT';
 
 /** State priority levels (higher priority overrides lower priority). */
 export const STATE_PRIORITIES: Record<PetState, number> = {
+  HATCHING: 60,  // birth sequence — cannot be interrupted
   WARNING: 50,
   INTERACTING: 40,
   SURPRISED: 40,

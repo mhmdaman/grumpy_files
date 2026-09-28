@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Fallback configs including newly discovered animations
   const fallbackConfigs = {
+    HATCHING: { name: 'hatching', relativePath: 'assets/grumpyduck/hatching.gif', loop: false, type: 'gif' },
     IDLE: { name: 'idle', relativePath: 'assets/grumpyduck/idle.gif', loop: true, type: 'gif' },
     WALK_LEFT: { name: 'walk-left', relativePath: 'assets/grumpyduck/walk-left.gif', loop: true, type: 'gif' },
     WALK_RIGHT: { name: 'walk-right', relativePath: 'assets/grumpyduck/walk-right.gif', loop: true, type: 'gif' },

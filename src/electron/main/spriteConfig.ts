@@ -20,6 +20,16 @@ export interface AnimationConfig {
 export type AnimationState = PetState;
 
 export const SPRITE_CONFIGS: Record<string, AnimationConfig> = {
+  HATCHING: {
+    name: 'hatching',
+    relativePath: 'assets/grumpyduck/hatching.gif',
+    loop: false,
+    type: 'gif',
+    priority: STATE_PRIORITIES.HATCHING,
+    movementAllowed: false,
+    defaultDurationMs: 5040,
+    fallbackState: 'IDLE',
+  },
   IDLE: {
     name: 'idle',
     relativePath: 'assets/grumpyduck/idle.gif',
