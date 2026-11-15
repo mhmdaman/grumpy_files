@@ -758,6 +758,130 @@ document.addEventListener('DOMContentLoaded', async () => {
       .replace(/'/g, '&#039;');
   }
 
+  // ── Storage Scan Panel ────────────────────────────────────────────────────
+  const scanStorageBtn     = document.getElementById('scan-storage-btn');
+  const storagePanel       = document.getElementById('storage-scan-panel');
+  const storagePanelClose  = document.getElementById('storage-panel-close');
+  const storageScanState   = document.getElementById('storage-scanning-state');
+  const storageResultState = document.getElementById('storage-results-state');
+  const storageErrorState  = document.getElementById('storage-error-state');
+  const storageErrorMsg    = document.getElementById('storage-error-message');
+  const storageTableBody   = document.getElementById('storage-table-body');
+  const storagePanelSubtitle = document.getElementById('storage-panel-subtitle');
+
+  function showStorageState(which) {
+    storageScanState.classList.add('hidden');
+    storageResultState.classList.add('hidden');
+    storageErrorState.classList.add('hidden');
+    if (which === 'scanning') storageScanState.classList.remove('hidden');
+    else if (which === 'results') storageResultState.classList.remove('hidden');
+    else if (which === 'error') storageErrorState.classList.remove('hidden');
+  }
+
+  function openStoragePanel() {
+    storagePanel.classList.remove('hidden');
+    // Trigger reflow for animation
+    void storagePanel.offsetWidth;
+    storagePanel.classList.add('visible');
+  }
+
+  function closeStoragePanel() {
+    storagePanel.classList.remove('visible');
+    storagePanel.addEventListener('transitionend', () => {
+      storagePanel.classList.add('hidden');
+    }, { once: true });
+  }
+
+  if (storagePanelClose) {
+    storagePanelClose.addEventListener('click', closeStoragePanel);
+  }
+
+  // Size bar: estimate relative width from the parsed number embedded in du output
+  function parseSizeToBytes(sizeStr) {
+    if (!sizeStr) return 0;
+    const match = sizeStr.match(/^([\d.]+)\s*([BKMGTPE]?)i?$/i);
+    if (!match) return 0;
+    const num = parseFloat(match[1]);
+    const unit = (match[2] || 'B').toUpperCase();
+    const multipliers = { B: 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4, P: 1024 ** 5, E: 1024 ** 6 };
+    return num * (multipliers[unit] || 1);
+  }
+
+  function renderStorageTable(entries) {
+    if (!entries || entries.length === 0) {
+      showStorageState('error');
+      storageErrorMsg.textContent = 'No storage data returned.';
+      return;
+    }
+
+    const maxBytes = parseSizeToBytes(entries[0].size);
+
+    storageTableBody.innerHTML = '';
+    entries.forEach((entry, idx) => {
+      const bytes = parseSizeToBytes(entry.size);
+      const pct = maxBytes > 0 ? Math.max(4, Math.round((bytes / maxBytes) * 100)) : 4;
+        const displayName = entry.name || entry.path;
+
+      const tr = document.createElement('tr');
+      tr.className = 'storage-row';
+      tr.innerHTML = `
+        <td class="col-rank"><span class="rank-badge">${idx + 1}</span></td>
+        <td class="col-size">
+          <div class="size-cell">
+            <span class="size-label">${escapeHtml(entry.size)}</span>
+            <div class="size-bar-track"><div class="size-bar-fill" style="width:${pct}%"></div></div>
+          </div>
+        </td>
+        <td class="col-name" title="${escapeHtml(entry.path)}">${escapeHtml(displayName)}</td>
+        <td class="col-path"><span class="path-text" title="${escapeHtml(entry.path)}">${escapeHtml(entry.path)}</span></td>
+        <td class="col-action">
+          <button class="btn btn-action storage-reveal-btn" data-path="${escapeHtml(entry.path)}" title="Reveal in Finder">🔍</button>
+        </td>
+      `;
+
+      tr.querySelector('.storage-reveal-btn').addEventListener('click', () => {
+        if (window.grumpyDuckApi?.revealInFinder) {
+          window.grumpyDuckApi.revealInFinder(entry.path);
+          showToast(`Revealed in Finder: ${entry.name || entry.path}`);
+        }
+      });
+
+      storageTableBody.appendChild(tr);
+    });
+
+    const ts = new Date().toLocaleTimeString();
+    storagePanelSubtitle.textContent = `Top ${entries.length} largest items in ~ · scanned at ${ts}`;
+    showStorageState('results');
+  }
+
+  if (scanStorageBtn) {
+    scanStorageBtn.addEventListener('click', async () => {
+      openStoragePanel();
+      showStorageState('scanning');
+      scanStorageBtn.disabled = true;
+      scanStorageBtn.textContent = '⏳ Scanning…';
+
+      try {
+        if (!window.grumpyDuckApi?.scanStorage) {
+          throw new Error('scanStorage API not available.');
+        }
+        const result = await window.grumpyDuckApi.scanStorage();
+        if (result.success && result.entries) {
+          renderStorageTable(result.entries);
+        } else {
+          showStorageState('error');
+          storageErrorMsg.textContent = result.error || 'Scan returned no data.';
+        }
+      } catch (err) {
+        showStorageState('error');
+        storageErrorMsg.textContent = err.message || 'Unknown error during scan.';
+      } finally {
+        scanStorageBtn.disabled = false;
+        scanStorageBtn.textContent = '💾 Scan Storage';
+      }
+    });
+  }
+
   // Initial load
   loadData();
 });

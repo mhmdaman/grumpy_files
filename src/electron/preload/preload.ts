@@ -21,6 +21,12 @@ export interface DebugData {
   position: { x: number; y: number };
 }
 
+export interface StorageEntry {
+  size: string;
+  path: string;
+  name: string;
+}
+
 export interface GrumpyDuckApi {
   getSpriteConfigs: () => Promise<any>;
   getInitialState: () => Promise<string>;
@@ -44,6 +50,7 @@ export interface GrumpyDuckApi {
   moveToTrashBatch: (filePaths: string[]) => Promise<{ successCount: number; failureCount: number; reclaimedBytes?: number }>;
   onCleanupDataUpdated: (callback: (data: any) => void) => () => void;
   notifyPetSpeech: (text: string, duration?: number) => void;
+  scanStorage: () => Promise<{ success: boolean; entries?: StorageEntry[]; error?: string }>;
 }
 
 const api: GrumpyDuckApi = {
@@ -93,6 +100,7 @@ const api: GrumpyDuckApi = {
     return () => ipcRenderer.removeListener('cleanup:data-updated', handler);
   },
   notifyPetSpeech: (text: string, duration?: number) => ipcRenderer.send('pet:custom-speech', { text, duration }),
+  scanStorage: () => ipcRenderer.invoke('pet:scan-storage'),
 };
 
 contextBridge.exposeInMainWorld('grumpyDuckApi', api);

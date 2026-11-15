@@ -6,6 +6,7 @@ import { ipcMain, BrowserWindow, dialog, Menu, MenuItemConstructorOptions, shell
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { execFile } from 'child_process';
 import { MovementController } from './movement';
 import { SPRITE_CONFIGS } from './spriteConfig';
 import { savePetPosition } from './positionStore';
@@ -627,6 +628,48 @@ export function setupIpcHandlers(
 
   ipcMain.handle('pet:scan-directory', async (_event, dir: string) => {
     await triggerScan(dir);
+  });
+
+  // ── Storage Scanner: runs `du -xhd 1 ~` and returns top-20 entries ────────
+  ipcMain.handle('pet:scan-storage', async () => {
+    return new Promise<{ success: boolean; entries?: { size: string; path: string; name: string }[]; error?: string }>((resolve) => {
+      const homeDir = os.homedir();
+
+      // We call /bin/sh with -c so stderr redirection works correctly
+      execFile(
+        '/bin/sh',
+        ['-c', 'du -xhd 1 ~ 2>/dev/null | sort -hr | head -20'],
+        { maxBuffer: 2 * 1024 * 1024 }, // 2 MB stdout limit
+        (err, stdout) => {
+          // du exits non-zero when it hits permission-denied dirs — that's fine,
+          // we still have useful stdout output.
+          const raw = (stdout || '').trim();
+          if (!raw) {
+            resolve({ success: false, error: err?.message || 'No output from du' });
+            return;
+          }
+
+          const entries = raw
+            .split('\n')
+            .map((line) => {
+              // Format: "<size>\t<path>"
+              const tabIdx = line.indexOf('\t');
+              if (tabIdx === -1) return null;
+              const size = line.slice(0, tabIdx).trim();
+              const fullPath = line.slice(tabIdx + 1).trim();
+              // Replace ~ prefix if present
+              const resolved = fullPath.startsWith('~')
+                ? path.join(homeDir, fullPath.slice(1))
+                : fullPath;
+              const name = path.basename(resolved) || resolved;
+              return { size, path: resolved, name };
+            })
+            .filter((e): e is { size: string; path: string; name: string } => e !== null);
+
+          resolve({ success: true, entries });
+        }
+      );
+    });
   });
 
   return { triggerScan };

@@ -23,6 +23,9 @@
         </div>
       </div>
       <div class="header-right">
+        <button id="scan-storage-btn" class="btn btn-secondary" title="Scan largest folders in Home directory">
+          💾 Scan Storage
+        </button>
         <button id="refresh-btn" class="btn btn-secondary" title="Refresh Candidates">
           🔄 Refresh
         </button>
@@ -198,6 +201,55 @@
     <!-- Notification Toast -->
     <div id="toast" class="toast hidden">
       <span id="toast-text">Message</span>
+    </div>
+
+    <!-- ── Storage Scan Panel (slide-in drawer) ───────────────────────────── -->
+    <div id="storage-scan-panel" class="storage-panel hidden">
+      <div class="storage-panel-header">
+        <div class="storage-panel-title-row">
+          <span class="storage-panel-icon">💾</span>
+          <div>
+            <h2 class="storage-panel-title">Storage Overview</h2>
+            <p class="storage-panel-subtitle" id="storage-panel-subtitle">Top 20 largest folders in your Home directory</p>
+          </div>
+        </div>
+        <button id="storage-panel-close" class="btn btn-secondary btn-small" title="Close">✕ Close</button>
+      </div>
+
+      <!-- Scanning animation -->
+      <div id="storage-scanning-state" class="storage-scanning hidden">
+        <div class="storage-scan-duck">🐥</div>
+        <div class="storage-scan-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <p class="storage-scan-label">Scanning your home directory…</p>
+      </div>
+
+      <!-- Results table -->
+      <div id="storage-results-state" class="storage-results hidden">
+        <div class="storage-table-wrapper">
+          <table class="storage-table">
+            <thead>
+              <tr>
+                <th class="col-rank">#</th>
+                <th class="col-size">Size</th>
+                <th class="col-name">Folder / File</th>
+                <th class="col-path">Path</th>
+                <th class="col-action"></th>
+              </tr>
+            </thead>
+            <tbody id="storage-table-body">
+            </tbody>
+          </table>
+        </div>
+        <p class="storage-notice">ℹ️ Read-only view — no files are modified or deleted.</p>
+      </div>
+
+      <!-- Error state -->
+      <div id="storage-error-state" class="storage-error hidden">
+        <span class="storage-error-icon">⚠️</span>
+        <p id="storage-error-message">An error occurred.</p>
+      </div>
     </div>
   </div>
 
