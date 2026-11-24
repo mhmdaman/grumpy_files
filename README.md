@@ -1,4 +1,4 @@
-# 🦆 GrumpyDuck — Desktop Pet & Safe Cleanup
+# 🐥 GrumpyDuck — Desktop Pet & Safe Cleanup
 
 > A read-only local file-organisation assistant that tells you the truth about your storage.
 
